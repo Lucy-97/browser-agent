@@ -1,42 +1,60 @@
-# Build outputs
-.dev-bins/
-.dev-pids/
-.dev-logs/
+# Binaries for programs and plugins
 *.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
 *.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
-# Env / secrets
-.env
-.env.local
-.env.*.local
-deploy/k3s/cluster-config.env
-deploy/k3s/kubeconfig*
+# Dependency directories (remove the comment below to include it)
+# vendor/
 
-# Go
-vendor/
-*.bin
+.history/
+.qoder/
 
-# Node / Next / Vite
-node_modules/
-.next/
-out/
-dist/
-.turbo/
+# OS local files
+.DS_Store
 
 # Python
 __pycache__/
-*.pyc
-.venv/
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
 *.egg-info/
 
-# IDE / OS
-.idea/
-.vscode/
-.DS_Store
-Thumbs.db
+# Next.js build output
+.next/
 
-# Logs
-*.log
-logs/
+# Go compiled binary
+backend-api/api
+
+# Temporary / debug scripts
+patch_kg.py
+fix_styles.py
+scp.py
+
+# Node / frontend
+node_modules/
+*.tsbuildinfo
+
+# Editor workspace settings
+.vscode/
+
+# Local reference repositories
+refer-repo/
+
+# Local runtime output
+deploy-local/.env
+deploy-local/logs/
+deploy-local/run/
+deploy-local/artifacts/
+backend-api/artifacts/

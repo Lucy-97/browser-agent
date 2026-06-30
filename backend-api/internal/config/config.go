@@ -1,81 +1,54 @@
 package config
 
-import (
-	"os"
-	"strconv"
-)
+import "os"
 
-// Config API 服务全部配置。
 type Config struct {
-	Server   ServerConfig
-	DB       DBConfig
-	Redis    RedisConfig
-	Internal InternalConfig
-	// MasterKey AES-256-GCM 加密密钥，配 dynconfig 使用。
-	MasterKey string
+	Addr           string
+	ArtifactDir    string
+	InternalSecret string
+	AdminAPIToken  string
+	WebAPIToken    string
+	MySQLDSN       string
+	MySQLMaxOpen   int
+	MySQLMaxIdle   int
+	RedisAddr      string
+	RedisPassword  string
+	RedisDB        int
+	AdminAPIURL    string
 }
 
-type ServerConfig struct {
-	Port string
-	Env  string
-}
-
-type DBConfig struct {
-	Host     string
-	Port     string
-	User     string
-	Password string
-	Name     string
-}
-
-type RedisConfig struct {
-	Host     string
-	Port     string
-	Password string
-	DB       int
-}
-
-type InternalConfig struct {
-	Secret string
-}
-
-// Load 从环境变量装配配置。
-func Load() *Config {
-	return &Config{
-		Server: ServerConfig{
-			Port: getEnv("API_PORT", "8001"),
-			Env:  getEnv("APP_ENV", "dev"),
-		},
-		DB: DBConfig{
-			Host:     getEnv("MYSQL_HOST", "localhost"),
-			Port:     getEnv("MYSQL_PORT", "3306"),
-			User:     getEnv("MYSQL_USER", "root"),
-			Password: getEnv("MYSQL_PASSWORD", ""),
-			Name:     getEnv("MYSQL_DB", "browser-agent"),
-		},
-		Redis: RedisConfig{
-			Host:     getEnv("REDIS_HOST", "localhost"),
-			Port:     getEnv("REDIS_PORT", "6379"),
-			Password: getEnv("REDIS_PASSWORD", ""),
-			DB:       getEnvInt("REDIS_DB", 0),
-		},
-		Internal:  InternalConfig{Secret: getEnv("INTERNAL_API_SECRET", "")},
-		MasterKey: getEnv("CONFIG_MASTER_KEY", ""),
+func Load() Config {
+	addr := os.Getenv("API_ADDR")
+	if addr == "" {
+		addr = ":28001"
+	}
+	return Config{
+		Addr:           addr,
+		ArtifactDir:    os.Getenv("ARTIFACT_DIR"),
+		InternalSecret: os.Getenv("INTERNAL_SECRET"),
+		AdminAPIToken:  os.Getenv("ADMIN_API_TOKEN"),
+		WebAPIToken:    os.Getenv("WEB_API_TOKEN"),
+		MySQLDSN:       os.Getenv("MYSQL_DSN"),
+		MySQLMaxOpen:   envInt("MYSQL_MAX_OPEN_CONNS", 10),
+		MySQLMaxIdle:   envInt("MYSQL_MAX_IDLE_CONNS", 5),
+		RedisAddr:      os.Getenv("REDIS_ADDR"),
+		RedisPassword:  os.Getenv("REDIS_PASSWORD"),
+		RedisDB:        envInt("REDIS_DB", 0),
+		AdminAPIURL:    os.Getenv("ADMIN_API_BASE_URL"),
 	}
 }
 
-func getEnv(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func envInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
 	}
-	return fallback
-}
-
-func getEnvInt(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
+	n := 0
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return fallback
 		}
+		n = n*10 + int(r-'0')
 	}
-	return fallback
+	return n
 }

@@ -1,12 +1,47 @@
-export const metadata = {
-  title: "BrowserAgent",
-  description: "BrowserAgent web app",
+import type { Metadata } from "next";
+import Link from "next/link";
+import { FileText, ClipboardList, Network, Home } from "lucide-react";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Browser Agent 自动化",
+  description: "自动化运营与版权监测控制台",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+const navItems = [
+  { href: "/", label: "工作台", icon: Home },
+  { href: "/jobs", label: "任务状态", icon: ClipboardList }
+];
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="zh-CN">
+      <body>
+        <div className="app-shell">
+          <header className="topbar">
+            <div className="brand-area">
+              <span className="brand">Agent</span>
+              <h1 className="title">自动化运营控制台</h1>
+            </div>
+            <nav className="nav-links">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link key={item.href} href={item.href} className="nav-link">
+                    <Icon size={16} />
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </header>
+          <main className="content">{children}</main>
+        </div>
+      </body>
     </html>
   );
 }

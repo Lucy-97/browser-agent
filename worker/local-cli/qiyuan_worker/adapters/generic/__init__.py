@@ -1,0 +1,1 @@
+"""Generic browser automation adapters."""

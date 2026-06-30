@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>QIYUAN Agent Demo</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 32px;
+      }
+      input,
+      button {
+        font: inherit;
+        min-height: 36px;
+      }
+      .result {
+        border-top: 1px solid #ddd;
+        margin-top: 12px;
+        padding-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>QIYUAN Agent Demo Search</h1>
+    <form id="searchForm">
+      <label for="search">Search</label>
+      <input id="search" name="q" type="search" placeholder="Search papers" />
+      <button id="submit" type="submit">Search</button>
+    </form>
+    <section id="results" aria-live="polite"></section>
+    <script>
+      document.querySelector("#searchForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const query = document.querySelector("#search").value || "empty";
+        document.querySelector("#results").innerHTML = `
+          <div class="result">Result: ${query} DFT+U extraction workflow</div>
+          <div class="result">Second Result: ${query} PDF artifact validation</div>
+        `;
+      });
+    </script>
+  </body>
+</html>

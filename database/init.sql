@@ -1,121 +1,193 @@
--- BrowserAgent 数据库初始化
---
--- 包含通用基础表：user / user_provider /
--- system_config / system_prompts / sys_admin
--- 业务表请按需追加在文件末尾。
+-- QIYUAN database baseline.
+-- Changelog:
+-- - 2026-06-18: Add Local Automation Worker platform schema baseline.
+-- - 2026-06-22: Add extraction_result table for LLM template-driven extraction.
 
-SET NAMES utf8mb4;
-CREATE DATABASE IF NOT EXISTS `browser-agent` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS worker_device (
+  id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NULL,
+  name VARCHAR(255) NOT NULL,
+  platform VARCHAR(64) NOT NULL,
+  worker_version VARCHAR(64) NOT NULL,
+  hostname_hash VARCHAR(128) NULL,
+  device_token_hash VARCHAR(128) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  capabilities_json JSON NULL,
+  last_seen_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  revoked_at DATETIME(3) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_worker_device_token_hash (device_token_hash),
+  KEY idx_worker_device_user_status (user_id, status),
+  KEY idx_worker_device_last_seen (last_seen_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- =====================================================
--- user：用户主表
--- =====================================================
-CREATE TABLE IF NOT EXISTS `browser-agent`.`user`
-(
-    `id`             BIGINT UNSIGNED AUTO_INCREMENT                    COMMENT '主键',
-    `uuid`           VARCHAR(64)      NOT NULL                         COMMENT '用户唯一标识',
-    `mobile`         VARCHAR(64)               DEFAULT NULL            COMMENT '手机号',
-    `email`          VARCHAR(128)              DEFAULT NULL            COMMENT '邮箱',
-    `status`         TINYINT UNSIGNED NOT NULL DEFAULT 0               COMMENT '账户状态：0-正常 / 1-冻结 / 2-注销',
-    `nick_name`      VARCHAR(128)              DEFAULT NULL            COMMENT '昵称',
-    `avatar`         VARCHAR(256)              DEFAULT NULL            COMMENT '头像URL',
-    `signature`      VARCHAR(256)              DEFAULT NULL            COMMENT '签名',
-    `gender`         TINYINT UNSIGNED NOT NULL DEFAULT 0               COMMENT '性别：0-女 / 1-男 / 2-其他',
-    `password_hash`  VARCHAR(256)              DEFAULT NULL            COMMENT '密码哈希（bcrypt）',
-    `member_level`   TINYINT UNSIGNED NOT NULL DEFAULT 0               COMMENT '会员等级',
-    `member_status`  TINYINT UNSIGNED NOT NULL DEFAULT 0               COMMENT '会员状态',
-    `member_expiry`  TIMESTAMP        NULL     DEFAULT NULL            COMMENT '会员到期时间',
-    `register_time`  TIMESTAMP                 DEFAULT CURRENT_TIMESTAMP,
-    `gmt_create`     TIMESTAMP                 DEFAULT CURRENT_TIMESTAMP,
-    `gmt_modify`     TIMESTAMP                 DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_uuid` (`uuid`),
-    UNIQUE KEY `uk_email` (`email`),
-    INDEX `idx_member_expiry` (`member_expiry`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '用户主表';
+CREATE TABLE IF NOT EXISTS worker_pairing (
+  id VARCHAR(64) NOT NULL,
+  pairing_code_hash VARCHAR(128) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  device_id VARCHAR(64) NULL,
+  requested_platform VARCHAR(64) NULL,
+  requested_worker_version VARCHAR(64) NULL,
+  requested_hostname_hash VARCHAR(128) NULL,
+  requested_capabilities_json JSON NULL,
+  approved_by_user_id VARCHAR(64) NULL,
+  expires_at DATETIME(3) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  approved_at DATETIME(3) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_worker_pairing_code_hash (pairing_code_hash),
+  KEY idx_worker_pairing_status_expires (status, expires_at),
+  KEY idx_worker_pairing_device (device_id),
+  CONSTRAINT fk_worker_pairing_device FOREIGN KEY (device_id) REFERENCES worker_device (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- =====================================================
--- TODO: 在此追加业务表，以下为示例模板：
--- =====================================================
--- CREATE TABLE IF NOT EXISTS `browser-agent`.`example_record`
--- (
---     `id`              BIGINT UNSIGNED AUTO_INCREMENT,
---     `user_uuid`       VARCHAR(64)     NOT NULL                         COMMENT '用户唯一标识',
---     `amount`          DECIMAL(10,4)   NOT NULL                         COMMENT '变动额度',
---     `type`            VARCHAR(32)     NOT NULL                         COMMENT '操作类型',
---     `ref_id`          VARCHAR(128)             DEFAULT NULL            COMMENT '关联单号',
---     `gmt_create`      TIMESTAMP                DEFAULT CURRENT_TIMESTAMP,
---     PRIMARY KEY (`id`),
---     INDEX `idx_user_uuid` (`user_uuid`)
--- ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '示例业务表';
+CREATE TABLE IF NOT EXISTS automation_job (
+  id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NULL,
+  job_type VARCHAR(128) NOT NULL,
+  adapter VARCHAR(128) NOT NULL,
+  title VARCHAR(255) NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'queued',
+  priority INT NOT NULL DEFAULT 0,
+  assigned_device_id VARCHAR(64) NULL,
+  required_capabilities_json JSON NULL,
+  target_json JSON NOT NULL,
+  input_json JSON NOT NULL,
+  policy_json JSON NOT NULL,
+  last_cursor_json JSON NULL,
+  last_error_code VARCHAR(128) NULL,
+  last_error_message TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  assigned_at DATETIME(3) NULL,
+  started_at DATETIME(3) NULL,
+  completed_at DATETIME(3) NULL,
+  PRIMARY KEY (id),
+  KEY idx_automation_job_user_status (user_id, status),
+  KEY idx_automation_job_type_status (job_type, status),
+  KEY idx_automation_job_assigned_device (assigned_device_id, status),
+  KEY idx_automation_job_priority (status, priority, created_at),
+  CONSTRAINT fk_automation_job_assigned_device FOREIGN KEY (assigned_device_id) REFERENCES worker_device (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- =====================================================
--- user_provider：第三方登录绑定
--- =====================================================
-CREATE TABLE IF NOT EXISTS `browser-agent`.`user_provider`
-(
-    `id`         BIGINT UNSIGNED AUTO_INCREMENT,
-    `user_uuid`  VARCHAR(64)      NOT NULL                            COMMENT '用户唯一标识',
-    `type`       TINYINT UNSIGNED NOT NULL                            COMMENT '登录类型：1-Google / 2-Apple / 3-WeChat',
-    `identity`   VARCHAR(64)      NOT NULL                            COMMENT '第三方平台唯一标识',
-    `gmt_create` TIMESTAMP                 DEFAULT CURRENT_TIMESTAMP,
-    `gmt_modify` TIMESTAMP                 DEFAULT CURRENT_TIMESTAMP  ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_identity_type` (`type`, `identity`),
-    INDEX `idx_user_uuid` (`user_uuid`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '第三方登录绑定表';
+CREATE TABLE IF NOT EXISTS automation_run (
+  id VARCHAR(64) NOT NULL,
+  job_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NULL,
+  device_id VARCHAR(64) NOT NULL,
+  adapter VARCHAR(128) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'running',
+  worker_version VARCHAR(64) NULL,
+  capabilities_json JSON NULL,
+  started_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  last_heartbeat_at DATETIME(3) NULL,
+  ended_at DATETIME(3) NULL,
+  summary_json JSON NULL,
+  error_code VARCHAR(128) NULL,
+  error_message TEXT NULL,
+  PRIMARY KEY (id),
+  KEY idx_automation_run_job_status (job_id, status),
+  KEY idx_automation_run_device_status (device_id, status),
+  KEY idx_automation_run_last_heartbeat (last_heartbeat_at),
+  CONSTRAINT fk_automation_run_job FOREIGN KEY (job_id) REFERENCES automation_job (id),
+  CONSTRAINT fk_automation_run_device FOREIGN KEY (device_id) REFERENCES worker_device (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- =====================================================
--- system_prompts：系统提示词
--- =====================================================
-CREATE TABLE IF NOT EXISTS `browser-agent`.`system_prompts`
-(
-    `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `prompt_key`  VARCHAR(64)     NOT NULL                            COMMENT '唯一 key',
-    `prompt_text` TEXT                     DEFAULT NULL               COMMENT '提示词内容',
-    `description` VARCHAR(1024)            DEFAULT NULL               COMMENT '说明',
-    `gmt_create`  TIMESTAMP                DEFAULT CURRENT_TIMESTAMP,
-    `gmt_modify`  TIMESTAMP                DEFAULT CURRENT_TIMESTAMP  ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_key` (`prompt_key`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '系统提示词';
+CREATE TABLE IF NOT EXISTS automation_checkpoint (
+  id VARCHAR(64) NOT NULL,
+  job_id VARCHAR(64) NOT NULL,
+  run_id VARCHAR(64) NOT NULL,
+  sequence INT NOT NULL,
+  stage VARCHAR(128) NOT NULL,
+  cursor_json JSON NULL,
+  progress_json JSON NULL,
+  result_json JSON NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_automation_checkpoint_run_sequence (run_id, sequence),
+  KEY idx_automation_checkpoint_job (job_id, created_at),
+  CONSTRAINT fk_automation_checkpoint_job FOREIGN KEY (job_id) REFERENCES automation_job (id),
+  CONSTRAINT fk_automation_checkpoint_run FOREIGN KEY (run_id) REFERENCES automation_run (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- =====================================================
--- system_config：动态配置（Go 写入，Python 只读）
--- =====================================================
-CREATE TABLE IF NOT EXISTS `browser-agent`.`system_config`
-(
-    `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `config_key`  VARCHAR(128)    NOT NULL                            COMMENT '配置键',
-    `config_val`  VARCHAR(2048)   NOT NULL  DEFAULT ''                COMMENT '配置值（encrypted=1 时为 AES-GCM 密文）',
-    `val_type`    VARCHAR(16)     NOT NULL  DEFAULT 'string'          COMMENT 'string / int / bool / json',
-    `encrypted`   TINYINT         NOT NULL  DEFAULT 0                 COMMENT '0=明文 / 1=AES-256-GCM',
-    `description` VARCHAR(256)              DEFAULT ''                COMMENT '配置说明',
-    `category`    VARCHAR(64)     NOT NULL  DEFAULT 'default'         COMMENT '分类',
-    `gmt_create`  TIMESTAMP                 DEFAULT CURRENT_TIMESTAMP,
-    `gmt_modify`  TIMESTAMP                 DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_config_key` (`config_key`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '系统动态配置';
+CREATE TABLE IF NOT EXISTS automation_artifact (
+  id VARCHAR(64) NOT NULL,
+  job_id VARCHAR(64) NOT NULL,
+  run_id VARCHAR(64) NOT NULL,
+  result_id VARCHAR(64) NULL,
+  artifact_type VARCHAR(64) NOT NULL,
+  storage_key VARCHAR(512) NULL,
+  filename VARCHAR(255) NULL,
+  content_type VARCHAR(128) NULL,
+  size_bytes BIGINT NULL,
+  sha256 VARCHAR(64) NULL,
+  metadata_json JSON NULL,
+  redaction_status VARCHAR(32) NOT NULL DEFAULT 'not_required',
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_automation_artifact_idempotency (job_id, run_id, artifact_type, sha256),
+  KEY idx_automation_artifact_run (run_id, artifact_type),
+  KEY idx_automation_artifact_result (result_id),
+  CONSTRAINT fk_automation_artifact_job FOREIGN KEY (job_id) REFERENCES automation_job (id),
+  CONSTRAINT fk_automation_artifact_run FOREIGN KEY (run_id) REFERENCES automation_run (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- =====================================================
--- sys_admin：管理后台账号（与 C 端 user 完全隔离）
--- 初始管理员通过环境变量 ADMIN_INITIAL_USERNAME / ADMIN_INITIAL_PASSWORD 创建
--- =====================================================
-CREATE TABLE IF NOT EXISTS `browser-agent`.`sys_admin`
-(
-    `id`              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
-    `username`        VARCHAR(64)      NOT NULL                       COMMENT '管理员用户名',
-    `password_hash`   VARCHAR(256)     NOT NULL                       COMMENT '密码哈希（bcrypt）',
-    `role`            VARCHAR(32)      NOT NULL  DEFAULT 'operator'   COMMENT 'superadmin / operator',
-    `permissions`     JSON                       DEFAULT NULL         COMMENT '页面权限列表(JSON)',
-    `status`          TINYINT UNSIGNED NOT NULL  DEFAULT 0            COMMENT '0-正常 / 1-禁用',
-    `must_change_pwd` TINYINT UNSIGNED NOT NULL  DEFAULT 1            COMMENT '1-首次须改密',
-    `last_login_at`   TIMESTAMP        NULL      DEFAULT NULL,
-    `gmt_create`      TIMESTAMP                  DEFAULT CURRENT_TIMESTAMP,
-    `gmt_modify`      TIMESTAMP                  DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_username` (`username`)
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci COMMENT = '管理后台账号表';
+CREATE TABLE IF NOT EXISTS automation_manual_action (
+  id VARCHAR(64) NOT NULL,
+  job_id VARCHAR(64) NOT NULL,
+  run_id VARCHAR(64) NOT NULL,
+  type VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  prompt TEXT NOT NULL,
+  details_json JSON NULL,
+  expires_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  resolved_at DATETIME(3) NULL,
+  PRIMARY KEY (id),
+  KEY idx_automation_manual_action_run_status (run_id, status),
+  KEY idx_automation_manual_action_job_status (job_id, status),
+  KEY idx_automation_manual_action_expires (status, expires_at),
+  CONSTRAINT fk_automation_manual_action_job FOREIGN KEY (job_id) REFERENCES automation_job (id),
+  CONSTRAINT fk_automation_manual_action_run FOREIGN KEY (run_id) REFERENCES automation_run (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- TODO: 在此追加你的业务表
+CREATE TABLE IF NOT EXISTS automation_audit_event (
+  id VARCHAR(64) NOT NULL,
+  job_id VARCHAR(64) NULL,
+  run_id VARCHAR(64) NULL,
+  device_id VARCHAR(64) NULL,
+  event_type VARCHAR(128) NOT NULL,
+  risk_level VARCHAR(32) NOT NULL DEFAULT 'low',
+  summary VARCHAR(512) NOT NULL,
+  payload_json JSON NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_automation_audit_job (job_id, created_at),
+  KEY idx_automation_audit_run (run_id, created_at),
+  KEY idx_automation_audit_device (device_id, created_at),
+  KEY idx_automation_audit_event_type (event_type, created_at),
+  CONSTRAINT fk_automation_audit_job FOREIGN KEY (job_id) REFERENCES automation_job (id),
+  CONSTRAINT fk_automation_audit_run FOREIGN KEY (run_id) REFERENCES automation_run (id),
+  CONSTRAINT fk_automation_audit_device FOREIGN KEY (device_id) REFERENCES worker_device (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS extraction_result (
+  id VARCHAR(36) NOT NULL PRIMARY KEY,
+  result_id VARCHAR(64) NOT NULL COMMENT '关联 qiyuan_literature_result.id',
+  template_name VARCHAR(100) NOT NULL COMMENT '抽取模板名称',
+  template_version INT NOT NULL DEFAULT 1 COMMENT '模板版本号',
+  extractions JSON NOT NULL COMMENT 'LLM 抽取的结构化数组',
+  llm_model VARCHAR(100) DEFAULT NULL COMMENT '使用的 LLM 模型',
+  prompt_tokens INT DEFAULT NULL COMMENT 'LLM prompt token 数',
+  completion_tokens INT DEFAULT NULL COMMENT 'LLM completion token 数',
+  extraction_status VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT 'pending|success|failed',
+  error_code VARCHAR(50) DEFAULT NULL,
+  error_message TEXT DEFAULT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_extraction_result_id (result_id),
+  INDEX idx_extraction_template (template_name),
+  INDEX idx_extraction_status (extraction_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

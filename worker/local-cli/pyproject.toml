@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qiyuan-worker"
+version = "0.1.0"
+description = "QIYUAN local Browser Worker CLI"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+browser = ["playwright>=1.40,<2"]
+
+[project.scripts]
+qiyuan-worker = "qiyuan_worker.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qiyuan_worker*"]
