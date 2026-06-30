@@ -1,0 +1,68 @@
+// Package service 业务逻辑层（原子服务）。
+//
+// 定位：Handler / Engine → **Service** → Repository
+//
+// Service 负责单一职责的原子操作（查用户、签 JWT、发邮件）。
+// 复杂的多步编排请放到 engine 层。
+package service
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/Lucy-97/browser-agent/backend-api/internal/cache"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/lock"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/model"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/repository"
+)
+
+const userCacheTTL = 5 * time.Minute
+
+// UserService 用户原子服务。
+type UserService interface {
+	GetByUUID(ctx context.Context, uuid string) (*model.User, error)
+	CreateUser(ctx context.Context, email, nickname string) (*model.User, error)
+}
+
+type userService struct {
+	repo  repository.UserRepository
+	rdb   *redis.Client
+	cache *cache.Service
+}
+
+// NewUserService 创建用户服务。rdb 不可为 nil（缓存/锁在 Redis 不可用时自动 fail-open）。
+func NewUserService(repo repository.UserRepository, rdb *redis.Client) UserService {
+	return &userService{repo: repo, rdb: rdb, cache: cache.NewService(rdb)}
+}
+
+// GetByUUID 通过业务 UUID 拉取用户。
+// 演示 Cache-Aside：5 分钟 Redis 缓存 + miss 异步回填；Redis 不可用时退化为直查 DB。
+func (s *userService) GetByUUID(ctx context.Context, userUUID string) (*model.User, error) {
+	if userUUID == "" {
+		return nil, fmt.Errorf("uuid required")
+	}
+	return cache.GetOrLoad(s.cache, ctx, "cache:user:"+userUUID, userCacheTTL, func() (*model.User, error) {
+		return s.repo.FindByUUID(ctx, userUUID)
+	})
+}
+
+// CreateUser 创建用户（原子操作，不含编排逻辑）。
+// 演示分布式锁：用 email 维度的锁避免并发重复创建；锁不可用时 fail-open。
+func (s *userService) CreateUser(ctx context.Context, email, nickname string) (*model.User, error) {
+	if l, err := lock.Acquire(ctx, s.rdb, "LOCK:USER_CREATE:"+email, 10*time.Second); err == nil && l != nil {
+		defer l.Release(ctx)
+	}
+	u := &model.User{
+		UUID:     uuid.New().String(),
+		Email:    email,
+		Nickname: nickname,
+	}
+	if err := s.repo.Create(ctx, u); err != nil {
+		return nil, err
+	}
+	return u, nil
+}

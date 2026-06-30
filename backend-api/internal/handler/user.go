@@ -1,0 +1,73 @@
+// Package handler 处理 HTTP 请求/响应。
+//
+// 调用规则：
+//   - 简单查询 → 直接调用 service
+//   - 多步编排 → 调用 engine
+//
+// Handler 不包含业务逻辑，只负责：解析参数 → 调用 engine/service → 返回响应。
+package handler
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"github.com/Lucy-97/browser-agent/backend-api/internal/engine"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/errcode"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/response"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/service"
+)
+
+// Set 把所有 handler 聚合到一个结构，便于在 router 中传递。
+type Set struct {
+	User *UserHandler
+}
+
+// UserHandler 用户域 handler。
+type UserHandler struct {
+	svc       service.UserService
+	exampleEg *engine.ExampleEngine
+}
+
+// NewUserHandler 创建。
+func NewUserHandler(svc service.UserService, eg *engine.ExampleEngine) *UserHandler {
+	return &UserHandler{svc: svc, exampleEg: eg}
+}
+
+// Me GET /api/v1/users/me — 返回当前登录用户信息。
+// 简单查询，直接调用 service。
+func (h *UserHandler) Me(c *gin.Context) {
+	uuid := c.GetHeader("X-User-UUID")
+	if uuid == "" {
+		response.Unauthorized(c, errcode.ErrUnauthorized.Code, errcode.ErrUnauthorized.Msg)
+		return
+	}
+	u, err := h.svc.GetByUUID(c.Request.Context(), uuid)
+	if err != nil {
+		response.InternalError(c, err.Error())
+		return
+	}
+	if u == nil {
+		response.Err(c, 404, errcode.ErrNotFound.Code, errcode.ErrNotFound.Msg)
+		return
+	}
+	response.OK(c, u)
+}
+
+// Register POST /api/v1/users/register — 用户注册。
+// 多步编排，调用 engine。
+func (h *UserHandler) Register(c *gin.Context) {
+	var req struct {
+		Email    string `json:"email" binding:"required"`
+		Nickname string `json:"nickname"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, errcode.ErrParamMissing.Code, errcode.ErrParamMissing.Msg)
+		return
+	}
+
+	result, err := h.exampleEg.RegisterUser(c.Request.Context(), req.Email, req.Nickname)
+	if err != nil {
+		response.BadRequest(c, errcode.ErrServiceBusy.Code, err.Error())
+		return
+	}
+	response.OK(c, result)
+}

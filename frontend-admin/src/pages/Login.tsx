@@ -1,0 +1,61 @@
+import { useState } from "react";
+import { api, setAdminToken } from "../api";
+
+export default function LoginPage() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    const json = await api<{ accessToken?: string }>("/admin/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    });
+    if (json.code !== "200") {
+      setErr(json.msg);
+      return;
+    }
+    if (json.data?.accessToken) setAdminToken(json.data.accessToken);
+    window.location.href = "/dashboard";
+  }
+
+  return (
+    <div style={pageStyle}>
+      <form onSubmit={onSubmit} style={formStyle}>
+        <h1>BrowserAgent Admin</h1>
+        <input
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+        />
+        <button type="submit">Sign in</button>
+        {err && <p style={errStyle}>{err}</p>}
+      </form>
+    </div>
+  );
+}
+
+const pageStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "100vh",
+};
+const formStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 12,
+  width: 320,
+};
+const errStyle: React.CSSProperties = { color: "red", fontSize: 14 };

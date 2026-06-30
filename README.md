@@ -1,0 +1,96 @@
+# BrowserAgent
+
+由 [platform-scaffold](https://github.com/platform-scaffold) 一键生成的「网关 + 业务API + AI引擎 + 前端 + 部署」工程骨架。
+
+## 架构概览
+
+```
+                ┌────────────┐
+   Web/Admin →  │  Gateway   │ (Go/Gin :8080)
+                │  JWT/限流   │
+                └─────┬──────┘
+                 ┌────┴────┐
+                 ▼         ▼
+       ┌──────────────┐  ┌──────────────────┐
+       │  Go API      │  │  Python AI       │
+       │  :8001│  │  FastAPI :8002     │
+       │  写权限       │  │  只读 (X-Internal│
+       │  GORM/MySQL  │  │  -Secret)        │
+       └──────┬───────┘  └────────┬─────────┘
+              │                   │
+              ▼                   ▼
+       ┌──────────────┐    ┌──────────┐
+       │  MySQL  Redis│    │  LLM API │
+       └──────────────┘    └──────────┘
+```
+
+## 快速开始
+
+```bash
+# 1. 起 MySQL + Redis
+cd deploy/local
+cp .env.example .env       # 按需修改密码、端口等
+docker compose -f docker-compose-all.yaml up -d
+cd ../..
+
+# 2. 启动后端三件套 + 前端
+./deploy/local/start.sh start
+
+# 3. 打开浏览器
+open http://localhost:3000
+open http://localhost:5174
+```
+
+管理脚本：
+
+```bash
+./deploy/local/start.sh status          # 查看状态
+./deploy/local/start.sh logs gateway    # 实时日志
+./deploy/local/start.sh restart api     # 重启某个服务
+./deploy/local/start.sh stop all        # 全部停止
+```
+
+## 目录结构
+
+```
+browser-agent/
+├── backend-gateway/      # Go 网关：JWT/限流/CORS/proxy
+├── backend-api/          # Go API：handler→service→repository
+├── backend-ai-engine/    # Python FastAPI：AI 编排（只读）
+├── frontend-web/         # Next.js 15 App Router
+├── frontend-admin/       # Vite + React 19 管理后台
+├── deploy/
+│   ├── local/            # docker-compose + start.sh
+│   └── k3s/              # K3s manifests + 部署脚本
+├── docs/                 # brd/prd/tech/ops/ui/tests 文档骨架
+├── skills/               # Agent skill 约定（example_skill）
+├── .github/workflows/    # CI
+└── database/init.sql     # 表结构（含 system_config）
+```
+
+> 通用组件（errcode / crypto / dynconfig / cache / lock / middleware / response）内聚在
+> `backend-api/internal/` 与 `backend-gateway/internal/`，不再有独立的共享库模块。
+
+## 核心约定
+
+- **写权限矩阵**：所有写操作走 Go API；Python AI Engine 只读，写操作通过内网调 Go API。
+- **服务间鉴权**：Gateway → API/AI 内网调用必须带 `X-Internal-Secret` 头（INTERNAL_API_SECRET）。
+- **JWT 在网关**：业务 API 不解析 JWT，由 Gateway 解析后用 `X-User-UUID` 头转发。
+- **动态配置**：运行时可调的参数走 `system_config` 表（敏感凭据 AES-256-GCM 加密），通过 `backend-api/internal/dynconfig` 加载。
+- **错误码**：使用 6 位业务码（`backend-api/internal/errcode`）；HTTP 状态用于鉴权/限流等基础设施层。
+
+详细约定见 [CLAUDE.md](file:///CLAUDE.md)。
+
+## 部署到生产
+
+```bash
+cd deploy/k3s
+cp cluster-config.env.example cluster-config.env  # 填好 K3s 节点、镜像仓库
+./install.sh fetch-kubeconfig
+./install.sh deploy
+./install.sh status
+```
+
+## License
+
+Internal use.
