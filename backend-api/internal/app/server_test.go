@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"qiyuan/backend-api/internal/config"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/config"
 )
 
 func TestAutomationMockJobLifecycle(t *testing.T) {
