@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"qiyuan/backend-api/internal/app"
-	"qiyuan/backend-api/internal/config"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/app"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/config"
 )
 
 func main() {

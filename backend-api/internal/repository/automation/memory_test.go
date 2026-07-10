@@ -3,8 +3,8 @@ package automation
 import (
 	"testing"
 
-	automationmodel "qiyuan/backend-api/internal/model/automation"
-	workermodel "qiyuan/backend-api/internal/model/worker"
+	automationmodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/automation"
+	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
 )
 
 func TestNextJobRequiresMatchingAdapterCapability(t *testing.T) {

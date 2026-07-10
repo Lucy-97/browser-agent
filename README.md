@@ -65,7 +65,7 @@ bash deploy-local/integration-test/20-automation-mysql-smoke.sh
 *   `backend-api`：Go 业务主服务，采用 Handler → Engine → Repository 分层，是用户、支付、业务数据的唯一写入节点。
 *   `worker/local-cli`：本地 Browser Worker CLI，P1 以 macOS Python 3.12 命令行形态运行，负责设备绑定、领取任务、控制本机 Chromium、上传爬取 artifact；不得保存或上传第三方文献源账号密码。
 *   `frontend-web`：Next.js 15 App Router，Cloudflare Pages 部署目标。
-*   `frontend-admin`：React + Vite 管理后台。
+*   `frontend-admin`：Next.js App Router 管理后台。
 
 ### 数据库 ownership 与迁移
 
@@ -79,7 +79,7 @@ bash deploy-local/integration-test/20-automation-mysql-smoke.sh
     *   Next.js 15 (App Router) + TailwindCSS 4。
     *   优先 SSR 提升 SEO 与首屏性能，打包后通过 Cloudflare Pages 部署于边缘网络。
 *   **Admin 控制台 (`frontend-admin`)**
-    *   React + Vite SPA。内部运营管理与可视化测试面板。所有请求走 `/admin/*` 路径，由后端提供 BFF 代理及独立 RBAC 鉴权。
+    *   Next.js App Router。内部运营管理与可视化测试面板。所有请求走 `/admin/*` 路径，由后端提供 BFF 代理及独立 RBAC 鉴权。
 
 
 ## 五、 本仓库 Agent 约定

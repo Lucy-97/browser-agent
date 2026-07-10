@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"qiyuan/backend-api/internal/lock"
-	automationmodel "qiyuan/backend-api/internal/model/automation"
-	workermodel "qiyuan/backend-api/internal/model/worker"
-	automationrepo "qiyuan/backend-api/internal/repository/automation"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/lock"
+	automationmodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/automation"
+	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
+	automationrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/automation"
 )
 
 type Repository interface {

@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
-	automationengine "qiyuan/backend-api/internal/engine/automation"
-	basehandler "qiyuan/backend-api/internal/handler"
-	workerhandler "qiyuan/backend-api/internal/handler/worker"
-	automationmodel "qiyuan/backend-api/internal/model/automation"
-	automationrepo "qiyuan/backend-api/internal/repository/automation"
+	automationengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/automation"
+	basehandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler"
+	workerhandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler/worker"
+	automationmodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/automation"
+	automationrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/automation"
 )
 
 type Handler struct {
