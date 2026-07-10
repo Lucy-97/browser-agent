@@ -171,6 +171,8 @@ docker compose -f deploy-local/docker-compose-backend.yaml up -d --force-recreat
 - [0617-local-automation-worker-implementation-plan.md](docs/tech/0617-local-automation-worker-implementation-plan.md)：通用 Automation Worker 的实施路线，覆盖 runtime 分层、go-api、Google Scholar adapter、artifact、人机协同、YouTube/TikTok PoC 和 Browser Agent 增强。
 - [0617-local-automation-platform-iteration-plan.md](docs/tech/0617-local-automation-platform-iteration-plan.md)：通用 Automation 平台整体迭代计划，统一平台 go-api、数据库、Admin、Web、Worker、部署验证和 YouTube/TikTok PoC 的阶段路线。
 - [0619-llm-browser-agent-integration-plan.md](docs/tech/0619-llm-browser-agent-integration-plan.md)：LLM Browser Agent 接入计划，明确 deterministic adapter 与 LLM Agent 边界、工具集、视觉/HTML 理解、阶段路线和未完成清单。
+- [0702-weixin-group-file-sync-agent-plan.md](docs/tech/0702-weixin-group-file-sync-agent-plan.md)：微信群资料同步 Agent 技术方案，规划基于 `weixin-agent-sdk` 的微信文件接收、本地归档、manifest 记录和后续资料库接入路径。
+- [0709-browser-agent-branch-handoff.md](docs/tech/0709-browser-agent-branch-handoff.md)：`feature/browser-agent` 分支工作交接文档，覆盖当前实现状态、本地启动、核心代码地图、任务链路、adapter 边界、风险事项和后续待办。
 
 #### `docs/tech/mvp/`
 

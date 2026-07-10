@@ -5,11 +5,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
-	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
+	workermodel "qiyuan/backend-api/internal/model/worker"
 )
 
 var (
@@ -41,7 +43,7 @@ func (repo *MemoryRepository) CreatePairing(req workermodel.PairingRequest) work
 	pairing := workermodel.Pairing{
 		ID:                  newID("pair"),
 		Code:                shortCode(),
-		VerificationURI:     "http://localhost:23001/worker/pair",
+		VerificationURI:     pairingVerificationURI(),
 		ExpiresAt:           now.Add(10 * time.Minute),
 		PollIntervalSeconds: 1,
 		Status:              "pending",
@@ -51,6 +53,14 @@ func (repo *MemoryRepository) CreatePairing(req workermodel.PairingRequest) work
 	}
 	repo.pairings[pairing.ID] = &pairing
 	return pairing
+}
+
+func pairingVerificationURI() string {
+	baseURL := strings.TrimRight(os.Getenv("PUBLIC_WEB_BASE_URL"), "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:23001"
+	}
+	return baseURL + "/worker/pair"
 }
 
 func (repo *MemoryRepository) GetPairing(pairingID string) (workermodel.Pairing, error) {

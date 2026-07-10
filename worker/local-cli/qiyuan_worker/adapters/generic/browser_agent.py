@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import os
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from qiyuan_worker.adapters.base import AutomationAdapter
 from qiyuan_worker.agent import (
@@ -255,20 +255,6 @@ class GenericBrowserAgentAdapter(AutomationAdapter):
                 else:
                     candidate_findings.append(label)
 
-            detected_findings = confirmed_findings or candidate_findings
-            detected_count = len(detected_findings)
-            if confirmed_findings:
-                conclusion = f"本次共发现 {detected_count} 个命中项，其中 {len(confirmed_findings)} 个已确认疑似侵权。"
-            elif candidate_findings:
-                conclusion = f"本次共发现 {detected_count} 个候选命中项，尚未确认明确侵权。"
-            elif stopped_reason == "repeated_failures" and last_error:
-                conclusion = f"本次执行中断：{last_error}"
-            elif stopped_reason == "stop_action":
-                conclusion = "本次任务已按规划正常停止，未形成可确认的侵权结论。"
-            elif stopped_reason == "policy_blocked":
-                conclusion = "本次任务受站点限制或风控阻断，未能形成可确认的侵权结论。"
-            else:
-                conclusion = "本次未识别到明确侵权页面。"
             summary = {
                 "action_count": action_count,
                 "actions_history": all_actions_history,
@@ -278,17 +264,22 @@ class GenericBrowserAgentAdapter(AutomationAdapter):
                 "url": last_observation.url,
                 "title": last_observation.title,
                 "extracts": all_extracts[-5:],
-                "detected": detected_count,
-                "confirmed": len(confirmed_findings),
-                "candidates": len(candidate_findings),
-                "findings": detected_findings[:10],
-                "conclusion": conclusion,
                 "mode": "llm_plan",
                 "task": task,
                 "stopped_reason": stopped_reason,
                 "last_error": last_error,
                 "trace_path": str(trace_path),
             }
+            summary.update(
+                _build_task_summary(
+                    task=task,
+                    stopped_reason=stopped_reason,
+                    last_error=last_error,
+                    extracts=all_extracts,
+                    confirmed_findings=confirmed_findings,
+                    candidate_findings=candidate_findings,
+                )
+            )
             for screenshot in all_screenshots:
                 context.artifact_collector.add_file("screenshot", screenshot, metadata={"url": summary["url"], "task": task})
             for download in all_downloads:
@@ -351,6 +342,56 @@ class _PlanExecutionResult:
         self.summary = summary
         self.trace_path = trace_path
         self.screenshot_path = screenshot_path
+
+
+def _build_task_summary(
+    *,
+    task: str,
+    stopped_reason: str,
+    last_error: str | None,
+    extracts: list[dict],
+    confirmed_findings: list[str],
+    candidate_findings: list[str],
+) -> dict[str, Any]:
+    if _is_copyright_task(task):
+        detected_findings = confirmed_findings or candidate_findings
+        detected_count = len(detected_findings)
+        if confirmed_findings:
+            conclusion = f"本次共发现 {detected_count} 个命中项，其中 {len(confirmed_findings)} 个已确认疑似侵权。"
+        elif candidate_findings:
+            conclusion = f"本次共发现 {detected_count} 个候选命中项，尚未确认明确侵权。"
+        elif stopped_reason == "repeated_failures" and last_error:
+            conclusion = f"本次执行中断：{last_error}"
+        elif stopped_reason == "stop_action":
+            conclusion = "本次任务已按规划正常停止，未形成可确认的侵权结论。"
+        elif stopped_reason == "policy_blocked":
+            conclusion = "本次任务受站点限制或风控阻断，未能形成可确认的侵权结论。"
+        else:
+            conclusion = "本次未识别到明确侵权页面。"
+        return {
+            "detected": detected_count,
+            "confirmed": len(confirmed_findings),
+            "candidates": len(candidate_findings),
+            "findings": detected_findings[:10],
+            "conclusion": conclusion,
+        }
+
+    if stopped_reason == "repeated_failures" and last_error:
+        conclusion = f"本次执行中断：{last_error}"
+    elif stopped_reason == "policy_blocked":
+        conclusion = "本次任务受站点限制或风控阻断，未能完成。"
+    elif extracts:
+        conclusion = "本次任务已完成，并生成结构化抽取结果。"
+    elif stopped_reason == "stop_action":
+        conclusion = "本次任务已按操作要求完成。"
+    else:
+        conclusion = "本次任务已结束。"
+    return {"conclusion": conclusion}
+
+
+def _is_copyright_task(task: str) -> bool:
+    lowered = task.lower()
+    return any(keyword in lowered for keyword in ("侵权", "版权", "取证", "copyright", "piracy"))
 
 
 def _optional_string(value: object) -> str | None:

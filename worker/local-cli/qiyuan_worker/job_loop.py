@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from . import __version__
 from .adapters import build_default_registry, load_worker_extensions
 from .browser import BrowserRuntime, BrowserRuntimeConfig
 from .config import WorkerConfig
+from .errors import APIError
 from .http_client import APIClient
 from .manifest import write_job
 from .models import DeviceInfo
@@ -113,10 +115,23 @@ def run_forever(
     device: DeviceInfo,
     source: str | None = None,
     once: bool = False,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     while True:
-        had_job = run_once(client, config, device, source=source)
+        try:
+            had_job = run_once(client, config, device, source=source)
+        except APIError as exc:
+            if once or not exc.retryable:
+                raise
+            log_event(
+                "worker.poll_retryable_error",
+                device_id=device.device_id,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            sleep(config.poll_interval_seconds)
+            continue
         if once:
             return
         if not had_job:
-            time.sleep(config.poll_interval_seconds)
+            sleep(config.poll_interval_seconds)

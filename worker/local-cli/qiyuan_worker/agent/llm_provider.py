@@ -132,6 +132,13 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                         retryable=True,
                     )
                 return final_text
+            except urllib.error.HTTPError as exc:
+                message = _format_http_error(exc)
+                retryable = exc.code >= 500 or exc.code == 429
+                print(f"LLM Provider HTTP Error (attempt {attempt+1}/{max_retries}): {message}", file=sys.stderr)
+                if not retryable or attempt == max_retries - 1:
+                    raise LLMProviderError("AGENT_PROVIDER_ERROR", message, retryable=retryable) from exc
+                time.sleep(2 ** attempt)
             except (urllib.error.URLError, socket.error, TimeoutError, http.client.IncompleteRead, ssl.SSLError) as exc:
                 print(f"LLM Provider Transient Error (attempt {attempt+1}/{max_retries}): {exc}", file=sys.stderr)
                 if attempt == max_retries - 1:
@@ -149,6 +156,21 @@ class OpenAICompatibleLLMProvider(LLMProvider):
             except Exception as exc:
                 print(f"LLM Provider Fatal Error: {exc}", file=sys.stderr)
                 raise LLMProviderError("AGENT_PROVIDER_ERROR", str(exc), retryable=True) from exc
+
+
+def _format_http_error(exc: Any) -> str:
+    body = ""
+    try:
+        raw = exc.read()
+    except Exception:
+        raw = b""
+    if isinstance(raw, bytes):
+        body = raw.decode("utf-8", errors="replace").strip()
+    elif isinstance(raw, str):
+        body = raw.strip()
+    if body:
+        return f"HTTP Error {exc.code}: {exc.reason}: {body}"
+    return f"HTTP Error {exc.code}: {exc.reason}"
 
 
 def _extract_llm_content(raw_response: str, provider: str) -> str:

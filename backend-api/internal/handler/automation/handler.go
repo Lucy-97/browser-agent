@@ -19,11 +19,11 @@ import (
 	"strings"
 	"time"
 
-	automationengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/automation"
-	basehandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler"
-	workerhandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler/worker"
-	automationmodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/automation"
-	automationrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/automation"
+	automationengine "qiyuan/backend-api/internal/engine/automation"
+	basehandler "qiyuan/backend-api/internal/handler"
+	workerhandler "qiyuan/backend-api/internal/handler/worker"
+	automationmodel "qiyuan/backend-api/internal/model/automation"
+	automationrepo "qiyuan/backend-api/internal/repository/automation"
 )
 
 type Handler struct {
@@ -54,6 +54,8 @@ func (handler *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /web/automation/reports/copyright-evidence", handler.webCopyrightEvidenceReport)
 	mux.HandleFunc("POST /web/automation/browser-agent-jobs", handler.createWebBrowserAgentJob)
 	mux.HandleFunc("POST /web/automation/browser-act-jobs", handler.createWebBrowserActJob)
+	mux.HandleFunc("POST /web/automation/social-upload-jobs", handler.createWebSocialUploadJob)
+	mux.HandleFunc("POST /web/automation/weixin-desktop-sync-jobs", handler.createWebWeixinDesktopSyncJob)
 	mux.HandleFunc("GET /admin/automation/runs", handler.listRuns)
 	mux.HandleFunc("GET /admin/automation/runs/{run_id}", handler.run)
 	mux.HandleFunc("POST /admin/automation/runs/{run_id}/cancel", handler.cancelRun)
@@ -451,10 +453,10 @@ func (handler *Handler) listWebRuns(w http.ResponseWriter, r *http.Request) {
 
 func (handler *Handler) createWebBrowserAgentJob(w http.ResponseWriter, r *http.Request) {
 	handler.createBrowserJob(w, r, browserJobRequestConfig{
-		jobType:        "generic.browser.agent",
-		adapter:        "generic.browser_agent",
-		defaultMode:    "llm_plan",
-		allowedActions:  []string{"observe_page", "fill", "click", "click_element", "press", "extract", "screenshot", "wait_for"},
+		jobType:             "generic.browser.agent",
+		adapter:             "generic.browser_agent",
+		defaultMode:         "llm_plan",
+		allowedActions:      []string{"observe_page", "fill", "click", "click_element", "press", "extract", "screenshot", "wait_for"},
 		allowDownloadAction: true,
 	})
 }
@@ -466,6 +468,193 @@ func (handler *Handler) createWebBrowserActJob(w http.ResponseWriter, r *http.Re
 		defaultMode:    "cli",
 		allowedActions: []string{},
 	})
+}
+
+func (handler *Handler) createWebSocialUploadJob(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Platform              string   `json:"platform"`
+		VideoPath             string   `json:"video_path"`
+		ArtifactID            string   `json:"artifact_id"`
+		Title                 string   `json:"title"`
+		Description           string   `json:"description"`
+		Tags                  []string `json:"tags"`
+		Headed                *bool    `json:"headed"`
+		ManualPublishRequired *bool    `json:"manual_publish_required"`
+	}
+	if err := basehandler.DecodeJSON(r, &req); err != nil {
+		basehandler.WriteError(w, http.StatusBadRequest, "INVALID_JSON", err.Error(), false)
+		return
+	}
+	platform := strings.ToLower(strings.TrimSpace(req.Platform))
+	config, ok := socialUploadPlatformConfig(platform)
+	if !ok {
+		basehandler.WriteError(w, http.StatusBadRequest, "SOCIAL_PLATFORM_UNSUPPORTED", "platform must be one of: youtube, tiktok, instagram", false)
+		return
+	}
+	videoPath := strings.TrimSpace(req.VideoPath)
+	artifactID := strings.TrimSpace(req.ArtifactID)
+	if videoPath == "" && artifactID == "" {
+		basehandler.WriteError(w, http.StatusBadRequest, "SOCIAL_VIDEO_REQUIRED", "video_path or artifact_id is required", false)
+		return
+	}
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
+		basehandler.WriteError(w, http.StatusBadRequest, "SOCIAL_TITLE_REQUIRED", "title is required", false)
+		return
+	}
+	tags := normalizeTags(req.Tags)
+	headed := true
+	if req.Headed != nil {
+		headed = *req.Headed
+	}
+	manualPublishRequired := false
+
+	job := handler.engine.CreateJob(automationmodel.CreateJobRequest{
+		JobType: config.jobType,
+		Adapter: config.adapter,
+		Target: map[string]any{
+			"allowed_domains": config.allowedDomains,
+		},
+		Input: map[string]any{
+			"video_path":  videoPath,
+			"artifact_id": artifactID,
+			"title":       title,
+			"description": strings.TrimSpace(req.Description),
+			"tags":        tags,
+			"source":      "web_social_upload",
+			"platform":    platform,
+		},
+		Policy: map[string]any{
+			"headed":                  headed,
+			"allowed_domains":         config.allowedDomains,
+			"allowed_actions":         []string{"observe_page", "screenshot", "wait_for"},
+			"manual_publish_required": manualPublishRequired,
+		},
+		Priority: int(time.Now().Unix()),
+	})
+	basehandler.WriteJSON(w, http.StatusCreated, job)
+}
+
+func (handler *Handler) createWebWeixinDesktopSyncJob(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SourceDirs     []string                     `json:"source_dirs"`
+		GroupNames     []string                     `json:"group_names"`
+		SelectedGroups []weixinSelectedGroupRequest `json:"selected_groups"`
+		GroupKeywords  []string                     `json:"group_keywords"`
+		MaxFiles       int                          `json:"max_files"`
+		MaxFileBytes   int                          `json:"max_file_bytes"`
+	}
+	if err := basehandler.DecodeJSON(r, &req); err != nil {
+		basehandler.WriteError(w, http.StatusBadRequest, "INVALID_JSON", err.Error(), false)
+		return
+	}
+	sourceDirs := normalizeNonEmptyStrings(req.SourceDirs)
+	if len(sourceDirs) == 0 {
+		basehandler.WriteError(w, http.StatusBadRequest, "WEIXIN_SOURCE_DIRS_REQUIRED", "source_dirs is required", false)
+		return
+	}
+	groupNames := normalizeWeixinGroupNames(req.GroupNames, req.SelectedGroups, req.GroupKeywords)
+	if len(groupNames) == 0 {
+		basehandler.WriteError(w, http.StatusBadRequest, "WEIXIN_GROUPS_REQUIRED", "group_names is required", false)
+		return
+	}
+	maxFiles := req.MaxFiles
+	if maxFiles <= 0 {
+		maxFiles = 200
+	}
+	if maxFiles > 1000 {
+		maxFiles = 1000
+	}
+	maxFileBytes := req.MaxFileBytes
+	if maxFileBytes <= 0 {
+		maxFileBytes = 100 * 1024 * 1024
+	}
+	if maxFileBytes > 1024*1024*1024 {
+		maxFileBytes = 1024 * 1024 * 1024
+	}
+
+	job := handler.engine.CreateJob(automationmodel.CreateJobRequest{
+		JobType: "weixin.desktop_sync",
+		Adapter: "weixin.desktop_sync",
+		Target: map[string]any{
+			"source": "desktop_weixin",
+		},
+		Input: map[string]any{
+			"source_dirs":     sourceDirs,
+			"group_names":     groupNames,
+			"selected_groups": normalizeWeixinSelectedGroups(req.SelectedGroups, groupNames),
+			"group_keywords":  groupNames,
+			"source":          "web_weixin_desktop_sync",
+			"sync_mode":       "desktop_file_scan",
+			"requires_local":  true,
+		},
+		Policy: map[string]any{
+			"max_files":      maxFiles,
+			"max_file_bytes": maxFileBytes,
+		},
+		Priority: int(time.Now().Unix()),
+	})
+	basehandler.WriteJSON(w, http.StatusCreated, job)
+}
+
+type weixinSelectedGroupRequest struct {
+	GroupID     string `json:"group_id"`
+	DisplayName string `json:"display_name"`
+}
+
+type normalizedWeixinSelectedGroup struct {
+	GroupID     string `json:"group_id,omitempty"`
+	DisplayName string `json:"display_name"`
+}
+
+func normalizeWeixinGroupNames(groupNames []string, selectedGroups []weixinSelectedGroupRequest, legacyKeywords []string) []string {
+	values := normalizeNonEmptyStrings(groupNames)
+	for _, group := range selectedGroups {
+		values = append(values, strings.TrimSpace(group.DisplayName))
+	}
+	if len(values) == 0 {
+		values = append(values, normalizeNonEmptyStrings(legacyKeywords)...)
+	}
+	return uniqueNonEmptyStrings(values)
+}
+
+func normalizeWeixinSelectedGroups(selectedGroups []weixinSelectedGroupRequest, groupNames []string) []normalizedWeixinSelectedGroup {
+	groups := make([]normalizedWeixinSelectedGroup, 0, len(selectedGroups)+len(groupNames))
+	seen := map[string]bool{}
+	for _, group := range selectedGroups {
+		name := strings.TrimSpace(group.DisplayName)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		groups = append(groups, normalizedWeixinSelectedGroup{
+			GroupID:     strings.TrimSpace(group.GroupID),
+			DisplayName: name,
+		})
+	}
+	for _, name := range groupNames {
+		name = strings.TrimSpace(name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		groups = append(groups, normalizedWeixinSelectedGroup{DisplayName: name})
+	}
+	return groups
+}
+
+func uniqueNonEmptyStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }
 
 type browserJobRequestConfig struct {
@@ -974,6 +1163,62 @@ func normalizeDomains(values []string) []string {
 	return domains
 }
 
+type socialUploadConfig struct {
+	jobType        string
+	adapter        string
+	allowedDomains []string
+}
+
+func socialUploadPlatformConfig(platform string) (socialUploadConfig, bool) {
+	switch platform {
+	case "youtube":
+		return socialUploadConfig{
+			jobType:        "social.youtube.upload_video",
+			adapter:        "social.youtube.upload_video",
+			allowedDomains: []string{"studio.youtube.com", "*.youtube.com"},
+		}, true
+	case "tiktok":
+		return socialUploadConfig{
+			jobType:        "social.tiktok.upload_video",
+			adapter:        "social.tiktok.upload_video",
+			allowedDomains: []string{"www.tiktok.com", "*.tiktok.com"},
+		}, true
+	case "instagram":
+		return socialUploadConfig{
+			jobType:        "social.instagram.upload_video",
+			adapter:        "social.instagram.upload_video",
+			allowedDomains: []string{"www.instagram.com", "*.instagram.com"},
+		}, true
+	default:
+		return socialUploadConfig{}, false
+	}
+}
+
+func normalizeTags(values []string) []string {
+	tags := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		tag := strings.TrimSpace(strings.TrimPrefix(value, "#"))
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		tags = append(tags, tag)
+	}
+	return tags
+}
+
+func normalizeNonEmptyStrings(values []string) []string {
+	items := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			items = append(items, value)
+		}
+	}
+	return items
+}
+
 func policyTemplates() []automationmodel.PolicyTemplate {
 	return []automationmodel.PolicyTemplate{
 		{
@@ -1000,25 +1245,36 @@ func policyTemplates() []automationmodel.PolicyTemplate {
 			},
 		},
 		{
-			Name:        "social.youtube.upload_video.draft",
+			Name:        "social.youtube.upload_video.publish",
 			ProductLine: "social",
 			JobType:     "social.youtube.upload_video",
 			Adapter:     "social.youtube.upload_video",
 			Target:      map[string]any{"allowed_domains": []string{"studio.youtube.com", "*.youtube.com"}},
 			Policy: map[string]any{
 				"allowed_actions":         []string{"observe_page", "screenshot", "wait_for"},
-				"manual_publish_required": true,
+				"manual_publish_required": false,
 			},
 		},
 		{
-			Name:        "social.tiktok.upload_video.draft",
+			Name:        "social.tiktok.upload_video.publish",
 			ProductLine: "social",
 			JobType:     "social.tiktok.upload_video",
 			Adapter:     "social.tiktok.upload_video",
 			Target:      map[string]any{"allowed_domains": []string{"www.tiktok.com", "*.tiktok.com"}},
 			Policy: map[string]any{
 				"allowed_actions":         []string{"observe_page", "screenshot", "wait_for"},
-				"manual_publish_required": true,
+				"manual_publish_required": false,
+			},
+		},
+		{
+			Name:        "social.instagram.upload_video.publish",
+			ProductLine: "social",
+			JobType:     "social.instagram.upload_video",
+			Adapter:     "social.instagram.upload_video",
+			Target:      map[string]any{"allowed_domains": []string{"www.instagram.com", "*.instagram.com"}},
+			Policy: map[string]any{
+				"allowed_actions":         []string{"observe_page", "screenshot", "wait_for"},
+				"manual_publish_required": false,
 			},
 		},
 	}

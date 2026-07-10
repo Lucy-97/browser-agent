@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from qiyuan_worker.adapters.generic.browser_agent import GenericBrowserAgentAdapter
+from qiyuan_worker.adapters.generic.browser_agent import GenericBrowserAgentAdapter, _build_task_summary
 from qiyuan_worker.artifacts import ArtifactCollector
 from qiyuan_worker.config import write_default_config
 from qiyuan_worker.protocols import AutomationJob
@@ -58,6 +58,36 @@ class FakeClient:
 
 
 class GenericBrowserAgentAdapterTest(unittest.IsolatedAsyncioTestCase):
+    def test_social_ops_summary_does_not_use_copyright_fields(self) -> None:
+        summary = _build_task_summary(
+            task="前往该社交平台，搜索主题 'xdd'。提取最新热点",
+            stopped_reason="stop_action",
+            last_error=None,
+            extracts=[{"fields": {"hot_topics": ["Xdd", "Delusion xdd"]}}],
+            confirmed_findings=[],
+            candidate_findings=["Xdd"],
+        )
+
+        self.assertEqual(summary["conclusion"], "本次任务已完成，并生成结构化抽取结果。")
+        self.assertNotIn("detected", summary)
+        self.assertNotIn("findings", summary)
+        self.assertNotIn("侵权", summary["conclusion"])
+
+    def test_copyright_summary_keeps_detection_fields(self) -> None:
+        summary = _build_task_summary(
+            task="围绕关键词 '玫瑰的故事' 开展侵权取证",
+            stopped_reason="stop_action",
+            last_error=None,
+            extracts=[],
+            confirmed_findings=[],
+            candidate_findings=["example.com"],
+        )
+
+        self.assertEqual(summary["detected"], 1)
+        self.assertEqual(summary["candidates"], 1)
+        self.assertEqual(summary["findings"], ["example.com"])
+        self.assertIn("候选命中项", summary["conclusion"])
+
     async def test_llm_plan_mode_executes_actions_and_collects_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

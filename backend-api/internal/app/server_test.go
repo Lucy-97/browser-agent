@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Lucy-97/browser-agent/backend-api/internal/config"
+	"qiyuan/backend-api/internal/config"
 )
 
 func TestAutomationMockJobLifecycle(t *testing.T) {
@@ -233,8 +233,8 @@ func TestCreateWebBrowserActJob(t *testing.T) {
 	server := NewServer().Handler()
 
 	resp := postJSON(t, server, "/web/automation/browser-act-jobs", map[string]any{
-		"url":            "https://example.com",
-		"task":           "open example",
+		"url":             "https://example.com",
+		"task":            "open example",
 		"allowed_domains": []string{"example.com"},
 	}, "")
 	if resp.Code != http.StatusCreated {
@@ -250,6 +250,119 @@ func TestCreateWebBrowserActJob(t *testing.T) {
 	}
 	if got := job["input"].(map[string]any)["mode"]; got != "cli" {
 		t.Fatalf("input.mode = %v", got)
+	}
+}
+
+func TestCreateWebSocialUploadJob(t *testing.T) {
+	server := NewServer().Handler()
+
+	resp := postJSON(t, server, "/web/automation/social-upload-jobs", map[string]any{
+		"platform":    "instagram",
+		"video_path":  "/tmp/reel.mp4",
+		"title":       "Launch reel",
+		"description": "hello",
+		"tags":        []string{"#AI", "automation", "AI"},
+	}, "")
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("create social upload job status = %d body=%s", resp.Code, resp.Body.String())
+	}
+	var job map[string]any
+	decodeJSON(t, resp, &job)
+	if job["adapter"] != "social.instagram.upload_video" {
+		t.Fatalf("adapter = %v", job["adapter"])
+	}
+	if job["job_type"] != "social.instagram.upload_video" {
+		t.Fatalf("job_type = %v", job["job_type"])
+	}
+	input := job["input"].(map[string]any)
+	if input["title"] != "Launch reel" {
+		t.Fatalf("input.title = %v", input["title"])
+	}
+	tags := input["tags"].([]any)
+	if len(tags) != 2 || tags[0] != "AI" || tags[1] != "automation" {
+		t.Fatalf("input.tags = %#v", tags)
+	}
+	policy := job["policy"].(map[string]any)
+	if policy["manual_publish_required"] != false {
+		t.Fatalf("manual_publish_required = %v", policy["manual_publish_required"])
+	}
+
+	manualResp := postJSON(t, server, "/web/automation/social-upload-jobs", map[string]any{
+		"platform":                "instagram",
+		"video_path":              "/tmp/reel.mp4",
+		"title":                   "Manual review reel",
+		"manual_publish_required": true,
+	}, "")
+	if manualResp.Code != http.StatusCreated {
+		t.Fatalf("create manual social upload job status = %d body=%s", manualResp.Code, manualResp.Body.String())
+	}
+	var manualJob map[string]any
+	decodeJSON(t, manualResp, &manualJob)
+	manualPolicy := manualJob["policy"].(map[string]any)
+	if manualPolicy["manual_publish_required"] != false {
+		t.Fatalf("manual manual_publish_required = %v", manualPolicy["manual_publish_required"])
+	}
+}
+
+func TestCreateWebSocialUploadJobRejectsInvalidInput(t *testing.T) {
+	server := NewServer().Handler()
+
+	unsupported := postJSON(t, server, "/web/automation/social-upload-jobs", map[string]any{
+		"platform":   "xiaohongshu",
+		"video_path": "/tmp/video.mp4",
+		"title":      "title",
+	}, "")
+	if unsupported.Code != http.StatusBadRequest {
+		t.Fatalf("unsupported platform status = %d body=%s", unsupported.Code, unsupported.Body.String())
+	}
+
+	missingVideo := postJSON(t, server, "/web/automation/social-upload-jobs", map[string]any{
+		"platform": "instagram",
+		"title":    "title",
+	}, "")
+	if missingVideo.Code != http.StatusBadRequest {
+		t.Fatalf("missing video status = %d body=%s", missingVideo.Code, missingVideo.Body.String())
+	}
+}
+
+func TestCreateWebWeixinDesktopSyncJob(t *testing.T) {
+	server := NewServer().Handler()
+
+	resp := postJSON(t, server, "/web/automation/weixin-desktop-sync-jobs", map[string]any{
+		"source_dirs": []string{"/Users/mac/Library/Containers/com.tencent.xinWeChat"},
+		"group_names": []string{"科研群"},
+		"selected_groups": []map[string]any{
+			{"group_id": "local-1", "display_name": "项目资料群"},
+		},
+		"max_files": 50,
+	}, "")
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("create weixin desktop sync job status = %d body=%s", resp.Code, resp.Body.String())
+	}
+	var job map[string]any
+	decodeJSON(t, resp, &job)
+	if job["adapter"] != "weixin.desktop_sync" {
+		t.Fatalf("adapter = %v", job["adapter"])
+	}
+	if job["job_type"] != "weixin.desktop_sync" {
+		t.Fatalf("job_type = %v", job["job_type"])
+	}
+	input := job["input"].(map[string]any)
+	sourceDirs := input["source_dirs"].([]any)
+	if len(sourceDirs) != 1 {
+		t.Fatalf("source_dirs = %#v", sourceDirs)
+	}
+	groupNames := input["group_names"].([]any)
+	if len(groupNames) != 2 {
+		t.Fatalf("group_names = %#v", groupNames)
+	}
+	selectedGroups := input["selected_groups"].([]any)
+	if len(selectedGroups) != 2 {
+		t.Fatalf("selected_groups = %#v", selectedGroups)
+	}
+	policy := job["policy"].(map[string]any)
+	if policy["max_files"] != float64(50) {
+		t.Fatalf("max_files = %v", policy["max_files"])
 	}
 }
 

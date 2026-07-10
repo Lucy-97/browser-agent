@@ -208,4 +208,9 @@ class APIClient:
                 status=exc.code,
             )
         except Exception:
-            return APIError(code=f"HTTP_{exc.code}", message=exc.reason, status=exc.code)
+            return APIError(
+                code=f"HTTP_{exc.code}",
+                message=exc.reason,
+                retryable=exc.code >= 500,
+                status=exc.code,
+            )

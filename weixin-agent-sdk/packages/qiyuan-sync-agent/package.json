@@ -1,0 +1,26 @@
+{
+  "name": "qiyuan-weixin-sync-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QIYUAN WeChat group file sync agent based on weixin-agent-sdk",
+  "type": "module",
+  "bin": {
+    "qiyuan-weixin-sync-agent": "./main.ts"
+  },
+  "scripts": {
+    "login": "tsx main.ts login",
+    "start": "tsx main.ts start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "weixin-agent-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.8.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

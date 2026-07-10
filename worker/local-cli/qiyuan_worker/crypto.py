@@ -80,10 +80,10 @@ class DevFileSecretStore(SecretStore):
 
 
 def build_secret_store(secrets_dir: Path) -> SecretStore:
-    if platform.system() == "Darwin":
-        return MacOSKeychainSecretStore()
     if os.environ.get("QIYUAN_WORKER_ALLOW_INSECURE_FILE_SECRETS") == "1":
         return DevFileSecretStore(secrets_dir)
+    if platform.system() == "Darwin":
+        return MacOSKeychainSecretStore()
     raise ConfigError(
         "no secure secret store available. On non-macOS dev machines, set "
         "QIYUAN_WORKER_ALLOW_INSECURE_FILE_SECRETS=1 only for local testing."

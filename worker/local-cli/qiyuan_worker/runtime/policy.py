@@ -14,6 +14,7 @@ class PolicyViolation(RuntimeError):
 _BROWSER_JOB_PREFIXES = (
     "social.youtube.",
     "social.tiktok.",
+    "social.instagram.",
     "generic.browser.",
     "generic.form.",
     "generic.file.",

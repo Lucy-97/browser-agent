@@ -44,6 +44,7 @@ load_env() {
   export PYTHONPATH="$WORKER_DIR"
   export QIYUAN_WORKER_SERVER="${WORKER_SERVER_URL:-${ADMIN_API_BASE_URL:-http://127.0.0.1:28001}}"
   export QIYUAN_WORKER_DISPLAY_NAME="${WORKER_DISPLAY_NAME:-QIYUAN Local Worker}"
+  export QIYUAN_WORKER_ENABLED_PRODUCTS="${QIYUAN_WORKER_ENABLED_PRODUCTS:-core,browser_agent,literature,social,weixin}"
 }
 
 worker_cli() {
@@ -68,7 +69,11 @@ start_session() {
     echo "log: $LOG_FILE"
     return
   fi
-  tmux new-session -d -s "$SESSION_NAME" "QIYUAN_ENV='${QIYUAN_ENV:-}' QIYUAN_WORKER_TMUX_CHILD=1 bash '$SCRIPT_PATH'"
+  if [[ -n "${QIYUAN_ENV:-}" ]]; then
+    tmux new-session -d -s "$SESSION_NAME" "QIYUAN_ENV='${QIYUAN_ENV}' QIYUAN_WORKER_TMUX_CHILD=1 bash '$SCRIPT_PATH'"
+  else
+    tmux new-session -d -s "$SESSION_NAME" "QIYUAN_WORKER_TMUX_CHILD=1 bash '$SCRIPT_PATH'"
+  fi
   echo "Worker started in tmux session: $SESSION_NAME"
   echo "Attach logs: tmux attach -t $SESSION_NAME"
   echo "log: $LOG_FILE"

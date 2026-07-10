@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
+	workermodel "qiyuan/backend-api/internal/model/worker"
 )
 
 type MySQLRepository struct {
@@ -27,7 +27,7 @@ func (repo *MySQLRepository) CreatePairing(req workermodel.PairingRequest) worke
 	pairing := workermodel.Pairing{
 		ID:                  mysqlNewID("pair"),
 		Code:                mysqlShortCode(),
-		VerificationURI:     "http://localhost:23001/worker/pair",
+		VerificationURI:     pairingVerificationURI(),
 		ExpiresAt:           now.Add(10 * time.Minute),
 		PollIntervalSeconds: 1,
 		Status:              "pending",

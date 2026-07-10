@@ -5,6 +5,7 @@ from qiyuan_worker.adapters.generic.browser_agent import GenericBrowserAgentAdap
 from qiyuan_worker.adapters.manual.upload import ManualUploadAdapter
 from qiyuan_worker.adapters.mock.echo import MockEchoAdapter
 from qiyuan_worker.adapters.social.upload import SocialUploadAdapter
+from qiyuan_worker.adapters.weixin.desktop_sync import WeixinDesktopSyncAdapter
 from qiyuan_worker.sdk import PolicyTemplate, WorkerExtension
 
 
@@ -95,35 +96,79 @@ def builtin_worker_extensions() -> tuple[WorkerExtension, ...]:
         WorkerExtension(
             name="social.upload",
             product_line="social",
-            adapters=(SocialUploadAdapter("youtube"), SocialUploadAdapter("tiktok")),
+            adapters=(
+                SocialUploadAdapter("douyin"),
+                SocialUploadAdapter("youtube"),
+                SocialUploadAdapter("tiktok"),
+                SocialUploadAdapter("instagram"),
+            ),
             capabilities=(
+                "adapter.social.douyin.upload_video",
                 "adapter.social.youtube.upload_video",
                 "adapter.social.tiktok.upload_video",
+                "adapter.social.instagram.upload_video",
             ),
             policy_templates=(
                 PolicyTemplate(
-                    name="social.youtube.upload_video.draft",
+                    name="social.douyin.upload_video.publish",
+                    product_line="social",
+                    job_type="social.douyin.upload_video",
+                    adapter="social.douyin.upload_video",
+                    target={"allowed_domains": ["creator.douyin.com", "*.douyin.com"]},
+                    policy={
+                        "manual_publish_required": False,
+                    },
+                ),
+                PolicyTemplate(
+                    name="social.youtube.upload_video.publish",
                     product_line="social",
                     job_type="social.youtube.upload_video",
                     adapter="social.youtube.upload_video",
                     target={"allowed_domains": ["studio.youtube.com", "*.youtube.com"]},
                     policy={
-                        "allowed_actions": ["observe_page", "screenshot", "wait_for"],
-                        "manual_publish_required": True,
+                        "manual_publish_required": False,
                     },
                 ),
                 PolicyTemplate(
-                    name="social.tiktok.upload_video.draft",
+                    name="social.tiktok.upload_video.publish",
                     product_line="social",
                     job_type="social.tiktok.upload_video",
                     adapter="social.tiktok.upload_video",
                     target={"allowed_domains": ["www.tiktok.com", "*.tiktok.com"]},
                     policy={
-                        "allowed_actions": ["observe_page", "screenshot", "wait_for"],
-                        "manual_publish_required": True,
+                        "manual_publish_required": False,
+                    },
+                ),
+                PolicyTemplate(
+                    name="social.instagram.upload_video.publish",
+                    product_line="social",
+                    job_type="social.instagram.upload_video",
+                    adapter="social.instagram.upload_video",
+                    target={"allowed_domains": ["www.instagram.com", "*.instagram.com"]},
+                    policy={
+                        "manual_publish_required": False,
                     },
                 ),
             ),
             requires_playwright=True,
+        ),
+        WorkerExtension(
+            name="weixin.desktop_sync",
+            product_line="weixin",
+            adapters=(WeixinDesktopSyncAdapter(),),
+            capabilities=("adapter.weixin.desktop_sync",),
+            policy_templates=(
+                PolicyTemplate(
+                    name="weixin.desktop_sync.local_files",
+                    product_line="weixin",
+                    job_type="weixin.desktop_sync",
+                    adapter="weixin.desktop_sync",
+                    target={"source": "desktop_weixin"},
+                    policy={
+                        "max_files": 200,
+                        "max_file_bytes": 104857600,
+                    },
+                ),
+            ),
         ),
     )

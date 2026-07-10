@@ -7,7 +7,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
-	"github.com/Lucy-97/browser-agent/backend-api/internal/config"
+	"qiyuan/backend-api/internal/config"
 )
 
 func OpenMySQL(ctx context.Context, cfg config.Config) (*sql.DB, error) {

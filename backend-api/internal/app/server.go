@@ -6,16 +6,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Lucy-97/browser-agent/backend-api/internal/config"
-	"github.com/Lucy-97/browser-agent/backend-api/internal/database"
-	automationengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/automation"
-	workerengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/worker"
-	basehandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler"
-	automationhandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler/automation"
-	workerhandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler/worker"
-	"github.com/Lucy-97/browser-agent/backend-api/internal/lock"
-	automationrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/automation"
-	workerrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/worker"
+	"qiyuan/backend-api/internal/config"
+	"qiyuan/backend-api/internal/database"
+	automationengine "qiyuan/backend-api/internal/engine/automation"
+	workerengine "qiyuan/backend-api/internal/engine/worker"
+	basehandler "qiyuan/backend-api/internal/handler"
+	automationhandler "qiyuan/backend-api/internal/handler/automation"
+	workerhandler "qiyuan/backend-api/internal/handler/worker"
+	"qiyuan/backend-api/internal/lock"
+	automationrepo "qiyuan/backend-api/internal/repository/automation"
+	workerrepo "qiyuan/backend-api/internal/repository/worker"
 )
 
 type Server struct {

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import unittest
+from io import BytesIO
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from qiyuan_worker.agent.llm_provider import LLMProviderConfig, LLMProviderError, build_llm_provider
 
@@ -46,6 +48,22 @@ class LLMProviderTest(unittest.TestCase):
 
         self.assertEqual(err.code, "AGENT_PROVIDER_RESPONSE_INVALID")
         self.assertTrue(err.retryable)
+
+    def test_format_http_error_includes_response_body(self) -> None:
+        from qiyuan_worker.agent.llm_provider import _format_http_error
+
+        err = HTTPError(
+            url="https://example.test",
+            code=400,
+            msg="Bad Request",
+            hdrs={},
+            fp=BytesIO(b'{"error":{"message":"bad response_format"}}'),
+        )
+
+        message = _format_http_error(err)
+
+        self.assertIn("HTTP Error 400", message)
+        self.assertIn("bad response_format", message)
 
 
 if __name__ == "__main__":

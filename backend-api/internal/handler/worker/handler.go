@@ -6,10 +6,10 @@ import (
 	"strconv"
 	"strings"
 
-	workerengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/worker"
-	basehandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler"
-	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
-	workerrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/worker"
+	workerengine "qiyuan/backend-api/internal/engine/worker"
+	basehandler "qiyuan/backend-api/internal/handler"
+	workermodel "qiyuan/backend-api/internal/model/worker"
+	workerrepo "qiyuan/backend-api/internal/repository/worker"
 )
 
 type Handler struct {

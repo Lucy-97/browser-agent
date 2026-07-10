@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	automationmodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/automation"
-	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
+	automationmodel "qiyuan/backend-api/internal/model/automation"
+	workermodel "qiyuan/backend-api/internal/model/worker"
 )
 
 var (
@@ -395,15 +395,13 @@ func (repo *MemoryRepository) CancelRun(runID string, reason string) (automation
 }
 
 func adapterAllowed(adapter string, capabilities []string) bool {
-	if adapter == "mock.echo" {
-		for _, capability := range capabilities {
-			if capability == "adapter.mock.echo" {
-				return true
-			}
+	requiredCapability := "adapter." + adapter
+	for _, capability := range capabilities {
+		if capability == requiredCapability {
+			return true
 		}
-		return false
 	}
-	return true
+	return false
 }
 
 func mapOrEmpty(value map[string]any) map[string]any {

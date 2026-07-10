@@ -1,5 +1,7 @@
-import { BrowserActSmokeForm, CopyrightDetectionForm } from "@/components/CopyrightDetectionForm";
+import { CopyrightDetectionForm } from "@/components/CopyrightDetectionForm";
 import { SocialMediaOpsForm } from "@/components/SocialMediaOpsForm";
+import { SocialUploadForm } from "@/components/SocialUploadForm";
+import { WeixinSyncPanel } from "@/components/WeixinSyncPanel";
 import { WorkerSetup } from "@/components/WorkerSetup";
 
 export default function Home() {
@@ -15,9 +17,9 @@ export default function Home() {
           <CopyrightDetectionForm />
           <SocialMediaOpsForm />
         </div>
-        <div style={{ marginTop: 16, maxWidth: 720 }}>
-          <BrowserActSmokeForm />
-        </div>
+        <SocialUploadForm />
+        <WeixinSyncPanel />
+
       </section>
 
       <hr className="section-divider" />

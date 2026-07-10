@@ -53,7 +53,7 @@ node_modules/
 refer-repo/
 
 # Local runtime output
-deploy-local/.env
+deploy-local/.env*
 deploy-local/logs/
 deploy-local/run/
 deploy-local/artifacts/

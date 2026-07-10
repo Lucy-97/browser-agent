@@ -1,7 +1,7 @@
 package worker
 
 import (
-	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
+	workermodel "qiyuan/backend-api/internal/model/worker"
 )
 
 type Repository interface {

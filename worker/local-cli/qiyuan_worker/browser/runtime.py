@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -91,11 +92,13 @@ class BrowserRuntime:
                 headless=not self.config.headed,
                 accept_downloads=True,
                 downloads_path=str(self.config.downloads_dir),
-                # Strip --no-sandbox from Playwright defaults: it is unnecessary
-                # on macOS (headed mode), triggers Chrome's "unsupported flag"
-                # banner, and is a strong automation-detection signal.
-                ignore_default_args=["--no-sandbox"],
             )
+            # Strip --no-sandbox from Playwright defaults on macOS (headed mode)
+            # as it is a strong automation-detection signal, but keep it in Docker
+            # because Chromium running as root requires --no-sandbox.
+            if getattr(os, "geteuid", lambda: -1)() != 0:
+                launch_kwargs["ignore_default_args"] = ["--no-sandbox"]
+            
             if self.config.channel:
                 launch_kwargs["channel"] = self.config.channel
             try:

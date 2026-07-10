@@ -6,7 +6,8 @@ import unittest
 
 from qiyuan_worker.adapters import AdapterRegistry, build_default_registry
 from qiyuan_worker.config import write_default_config
-from qiyuan_worker.job_loop import run_once
+from qiyuan_worker.errors import APIError
+from qiyuan_worker.job_loop import run_forever, run_once
 from qiyuan_worker.models import DeviceInfo
 from qiyuan_worker.protocols import AutomationJob
 from qiyuan_worker.runtime import JobRunner
@@ -125,6 +126,22 @@ class FakeLoopClient(FakeClient):
         return self.job_payload
 
 
+class StopLoop(Exception):
+    pass
+
+
+class FlakyHeartbeatClient(FakeLoopClient):
+    def __init__(self) -> None:
+        super().__init__(None)
+        self.heartbeat_attempts = 0
+
+    def device_heartbeat(self, device_id: str, payload: dict) -> dict:
+        self.heartbeat_attempts += 1
+        if self.heartbeat_attempts == 1:
+            raise APIError("NETWORK_ERROR", "temporary tunnel EOF", retryable=True)
+        return super().device_heartbeat(device_id, payload)
+
+
 class WorkerLoopE2ETest(unittest.TestCase):
     def test_run_once_claims_executes_and_completes_mock_job(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -162,6 +179,42 @@ class WorkerLoopE2ETest(unittest.TestCase):
             self.assertEqual(client.completions[0][1]["status"], "completed")
             self.assertEqual(client.artifacts[0][1]["artifact_type"], "mock.summary")
             self.assertIn("adapter.mock.echo", client.device_heartbeats[0][1]["capabilities"])
+
+    def test_run_forever_keeps_polling_after_retryable_network_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            config = write_default_config(config_path=tmp_path / "config.yaml", data_dir=tmp_path / "data")
+            config = config.__class__(
+                server=config.server,
+                data_dir=config.data_dir,
+                log_level=config.log_level,
+                poll_interval_seconds=0,
+                heartbeat_interval_seconds=config.heartbeat_interval_seconds,
+                enabled_products=("core",),
+                llm_provider=config.llm_provider,
+                llm_model=config.llm_model,
+            )
+            client = FlakyHeartbeatClient()
+            device = DeviceInfo(
+                device_id="dev_1",
+                name="local",
+                platform="darwin-arm64",
+                worker_version="0.1.0",
+            )
+            sleep_calls = 0
+
+            def stop_after_second_sleep(seconds: float) -> None:
+                nonlocal sleep_calls
+                sleep_calls += 1
+                if sleep_calls >= 2:
+                    raise StopLoop()
+
+            with self.assertRaises(StopLoop):
+                run_forever(client, config, device, sleep=stop_after_second_sleep)
+
+            self.assertEqual(client.heartbeat_attempts, 2)
+            self.assertEqual(client.claim_count, 1)
+            self.assertEqual(sleep_calls, 2)
 
 
 if __name__ == "__main__":

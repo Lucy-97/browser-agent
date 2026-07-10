@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	automationmodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/automation"
-	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
+	automationmodel "qiyuan/backend-api/internal/model/automation"
+	workermodel "qiyuan/backend-api/internal/model/worker"
 )
 
 type MySQLRepository struct {

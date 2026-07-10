@@ -11,6 +11,8 @@ dependencies = []
 
 [project.optional-dependencies]
 browser = ["playwright>=1.40,<2"]
+mcp = ["mcp>=1.0,<2"]
+all = ["playwright>=1.40,<2", "mcp>=1.0,<2"]
 
 [project.scripts]
 qiyuan-worker = "qiyuan_worker.cli:main"

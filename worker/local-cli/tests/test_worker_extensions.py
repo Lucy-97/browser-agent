@@ -37,8 +37,17 @@ class WorkerExtensionTest(unittest.TestCase):
         extensions = load_worker_extensions(enabled_products=("social",), include_entry_points=False)
         templates = [template.to_dict() for extension in extensions for template in extension.policy_templates]
 
-        self.assertEqual({item["adapter"] for item in templates}, {"social.youtube.upload_video", "social.tiktok.upload_video"})
-        self.assertTrue(all(item["policy"]["manual_publish_required"] for item in templates))
+        self.assertEqual(
+            {item["adapter"] for item in templates},
+            {
+                "social.douyin.upload_video",
+                "social.youtube.upload_video",
+                "social.tiktok.upload_video",
+                "social.instagram.upload_video",
+            },
+        )
+        self.assertTrue(all(not item["policy"]["manual_publish_required"] for item in templates))
+        self.assertIn("social.instagram.upload_video.publish", {item["name"] for item in templates})
 
     def test_capabilities_follow_enabled_products(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -61,6 +70,24 @@ class WorkerExtensionTest(unittest.TestCase):
             capabilities = detect_capabilities(core_config)
 
             self.assertIn("adapter.mock.echo", capabilities)
+
+            default_capabilities = detect_capabilities(config)
+
+            self.assertIn("adapter.social.tiktok.upload_video", default_capabilities)
+            self.assertIn("adapter.weixin.desktop_sync", default_capabilities)
+
+    def test_weixin_product_registers_desktop_sync(self) -> None:
+        registry = build_default_registry(enabled_products=("weixin",))
+        job = AutomationJob(
+            job_id="job_1",
+            run_id="run_1",
+            job_type="weixin.desktop_sync",
+            adapter="weixin.desktop_sync",
+        )
+
+        adapter = registry.resolve(job, {"adapter.weixin.desktop_sync"})
+
+        self.assertEqual(adapter.name, "weixin.desktop_sync")
 
 
 if __name__ == "__main__":

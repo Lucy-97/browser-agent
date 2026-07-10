@@ -152,7 +152,7 @@ function JobRow({
               </div>
             ) : runs && runs.length > 0 ? (
               runs.map((run) => (
-                <RunDetail key={run.run_id} run={run} task={task} url={url} />
+                <RunDetail key={run.run_id} run={run} job={job} task={task} url={url} />
               ))
             ) : (
               <div style={{ padding: 12, color: "var(--muted, #8a96a3)" }}>暂无执行记录</div>
@@ -164,13 +164,18 @@ function JobRow({
   );
 }
 
-function RunDetail({ run, task, url }: { run: Run; task: string; url: string }) {
+function RunDetail({ run, job, task, url }: { run: Run; job: Job; task: string; url: string }) {
   const summary = run.summary || {};
   const extracts = (summary.extracts as Array<{ fields?: Record<string, string> }>) || [];
   const hasExtracts = extracts.length > 0 && extracts.some((e) => e.fields && Object.keys(e.fields).length > 0);
   const findingItems = Array.isArray(summary.findings) ? summary.findings : [];
   const conclusion = typeof summary.conclusion === "string" ? summary.conclusion : "";
   const detected = typeof summary.detected === "number" ? summary.detected : null;
+  const isCopyrightTask = isCopyrightAutomationJob(job, task);
+  const conclusionTitle = isCopyrightTask ? "结论" : "执行结果";
+  const emptyConclusion = isCopyrightTask ? "暂无可展示的结论" : "任务已完成，暂无更多结构化结果。";
+  const artifactTitle = isCopyrightTask ? "取证产物" : "运行产物";
+  const screenshotTitle = isCopyrightTask ? "截图证据" : "运行截图";
 
   const [artifacts, setArtifacts] = useState<Artifact[] | null>(null);
   const [loadingArtifacts, setLoadingArtifacts] = useState(false);
@@ -220,17 +225,17 @@ function RunDetail({ run, task, url }: { run: Run; task: string; url: string }) 
         marginBottom: 10,
       }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "var(--primary, #214f6b)", marginBottom: 4 }}>
-          结论
+          {conclusionTitle}
         </div>
         <div style={{ fontSize: 13, color: "var(--foreground, #18212b)", lineHeight: 1.6 }}>
-          {conclusion || "暂无可展示的结论"}
+          {conclusion || emptyConclusion}
         </div>
-        {detected !== null ? (
+        {isCopyrightTask && detected !== null ? (
           <div style={{ fontSize: 12, color: "var(--muted, #4a5663)", marginTop: 4 }}>
             命中项：{detected}
           </div>
         ) : null}
-        {findingItems.length ? (
+        {isCopyrightTask && findingItems.length ? (
           <div style={{ marginTop: 6 }}>
             <div style={{ fontSize: 12, fontWeight: 600, color: "var(--primary, #214f6b)", marginBottom: 4 }}>
               本次命中项
@@ -302,7 +307,7 @@ function RunDetail({ run, task, url }: { run: Run; task: string; url: string }) 
           color: "var(--primary, #214f6b)",
           marginBottom: 6,
         }}>
-          取证产物
+          {artifactTitle}
         </div>
 
         {loadingArtifacts ? (
@@ -320,7 +325,7 @@ function RunDetail({ run, task, url }: { run: Run; task: string; url: string }) 
                 background: "rgba(34,197,94,0.04)",
               }}>
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
-                  截图证据（{screenshotArtifacts.length}）
+                  {screenshotTitle}（{screenshotArtifacts.length}）
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {screenshotArtifacts.slice(0, 6).map((artifact) => (
@@ -410,4 +415,14 @@ function RunDetail({ run, task, url }: { run: Run; task: string; url: string }) 
       ) : null}
     </div>
   );
+}
+
+function isCopyrightAutomationJob(job: Job, task: string): boolean {
+  const haystack = [
+    job.job_type,
+    job.adapter,
+    task,
+    typeof job.input?.mode === "string" ? job.input.mode : "",
+  ].join(" ");
+  return /侵权|版权|取证|copyright/i.test(haystack);
 }

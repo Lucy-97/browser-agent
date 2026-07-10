@@ -5,6 +5,7 @@ import sys
 
 from . import __version__
 from .browser import BrowserRuntime, BrowserRuntimeConfig
+from .mcp import run_mcp_server
 from .config import default_config_path, load_config, write_default_config
 from .crypto import build_secret_store
 from .device import create_pairing, poll_pairing_until_approved, require_device, require_token
@@ -57,6 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
     clear_parser = sub.add_parser("clear-session", help="clear local source session placeholder")
     clear_parser.add_argument("--source", required=True)
     clear_parser.set_defaults(func=cmd_clear_session)
+
+    mcp_parser = sub.add_parser("mcp", help="start MCP server for browser automation tools")
+    mcp_parser.add_argument("--profile", default="mcp", help="browser profile name (isolated from run)")
+    mcp_parser.add_argument("--headed", action="store_true", default=True, help="show browser window")
+    mcp_parser.add_argument("--headless", action="store_true", help="run browser headlessly")
+    mcp_parser.set_defaults(func=cmd_mcp)
 
     return parser
 
@@ -165,3 +172,8 @@ def cmd_logs(args: argparse.Namespace) -> None:
     lines = log_file.read_text(encoding="utf-8").splitlines()
     for line in lines[-args.tail :]:
         print(line)
+
+
+def cmd_mcp(args: argparse.Namespace) -> None:
+    headed = not args.headless
+    run_mcp_server(profile_name=args.profile, headed=headed)
