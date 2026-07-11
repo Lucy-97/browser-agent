@@ -33,7 +33,7 @@ type ExampleEngine struct {
 	// TODO: 注入更多依赖，如 lockService、cacheService、externalClient 等
 }
 
-// NewExampleEngine 构造函数。依赖通过 bootstrap.go 注入。
+// NewExampleEngine 构造函数。依赖由应用装配层注入。
 func NewExampleEngine(
 	userSvc service.UserService,
 	userRepo repository.UserRepository,

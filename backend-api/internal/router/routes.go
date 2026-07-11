@@ -3,7 +3,7 @@
 // 路由前缀均以 /api/v1/ 开头，与 gateway 转发规则对齐。
 // 新增业务模块时：
 //   1. 在 internal/model + internal/repository + internal/service + internal/handler 下增加对应文件
-//   2. 在 internal/app/bootstrap.go 中装配
+//   2. 在 internal/app/server.go 中装配
 //   3. 在此处注册路由
 package router
 
