@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-17：新增 Windows 原生平台与 Worker 启停脚本，覆盖 Go API、Web、Admin、Worker 的隐藏窗口常驻运行、状态检查、日志和 PID 管理。
 - 2026-06-27：引入本地多环境隔离机制（qiyuan 与 browser-agent）。支持通过 `QIYUAN_ENV` 变量无缝切换不同的底层容器（MySQL/Redis/Neo4j）和宿主机端口，实现单机双分支安全并存。
 - 2026-06-19：补充完整本地验收流程，覆盖环境检查、API/Worker 常驻启动、日志观察、mock/MySQL/Browser Agent/Google Scholar PDF demo、artifact 校验、manual action 和 Worker token 失效处理。
 - 2026-06-19：本机默认端口整体上移 20000，避让同机多项目开发端口冲突。
@@ -65,6 +66,40 @@ REDIS_ADDR=127.0.0.1:26380
 ```
 
 当前 Redis 用于 `automation:jobs:claim` 短租约锁，保护多 API 实例并发领取任务。未配置 `REDIS_ADDR` 时使用 no-op locker，便于本地 mock smoke test 在没有 Redis 的环境继续运行。
+
+### Windows 原生启动（browser-agent）
+
+Windows 需要 Docker Desktop（WSL2 后端）、Node.js/npm、Go 1.25 和 Python 3.12。平台脚本优先使用 `PATH` 中的 Go；未找到时会回退到 `%LOCALAPPDATA%\CodexTools\go1.25.0\go\bin\go.exe`。Worker 使用 `worker/local-cli/.venv`，浏览器由 Playwright 管理。
+
+首次准备基础设施和数据库：
+
+```powershell
+docker compose --env-file deploy-local/.env.browser-agent -f deploy-local/docker-compose-infra.yaml up -d
+bash deploy-local/tools/db-apply.sh all
+```
+
+若 Windows 没有 Bash，可进入 MySQL 容器依次应用 `database/init.sql`、`database/migrations/000000-baseline.sql`、`database/migrations/20260618_automation_platform_schema.sql` 和 `database/migrations/20260618_worker_device_token_hash.sql`。已初始化的数据卷不需要重复执行。
+
+启动和检查 API、Web、Admin：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-platform-windows.ps1 start -Environment browser-agent
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-platform-windows.ps1 status -Environment browser-agent
+```
+
+首次初始化 Worker 并安装 Chromium：
+
+```powershell
+worker/local-cli/.venv/Scripts/python.exe -m playwright install chromium
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-worker-windows.ps1 init -Environment browser-agent
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-worker-windows.ps1 pair -Environment browser-agent
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-worker-windows.ps1 doctor -Environment browser-agent
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-worker-windows.ps1 start -Environment browser-agent
+```
+
+Windows 未配置系统凭据存储时，本地开发环境可在忽略提交的 `.env.browser-agent` 中设置 `QIYUAN_WORKER_ALLOW_INSECURE_FILE_SECRETS=1`。这会把 Worker token 保存在用户应用数据目录，只适合受控的本地开发机，生产环境禁止使用。
+
+`browser-agent` 默认访问地址：Web `http://localhost:24001`、Admin `http://localhost:26174`、API `http://localhost:29001`、MySQL `127.0.0.1:24307`、Redis `127.0.0.1:27380`。停止服务时把 `start` 改为 `stop`；重启时改为 `restart`。日志位于 `deploy-local/logs/`，PID 文件位于 `deploy-local/run/`。
 
 ## 二、服务管理
 
