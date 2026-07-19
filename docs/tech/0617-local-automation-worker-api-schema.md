@@ -8,6 +8,7 @@
 
 ## Changelog
 
+- 2026-07-20：同步 artifact 实现契约：文件通过独立 multipart 端点流式上传，生产对象存入私有 R2；响应隐藏 `storage_key`，下载由 API 在租户 ownership 校验后受控返回。
 - 2026-07-19：同步生产化 Phase 1 数据与 API：增加 `tenant_id` ownership、严格配对批准、租户设备管理接口、可信 Gateway actor 和跨租户拒绝规则。
 - 2026-07-19：同步单一 Browser Agent 项目现状，移除已废弃的双分支解耦说明。
 - 2026-06-17：新增通用 Automation Worker API 与数据模型设计。将旧版文献场景 `crawl_*` 模型升级为 `automation_*` 通用模型，覆盖设备绑定、任务下发、能力声明、策略约束、checkpoint、artifact、人机协同、审计和 QIYUAN/YouTube/TikTok adapter 兼容关系。
@@ -651,14 +652,13 @@ Authorization: Bearer <device_token>
 }
 ```
 
-### 9. 注册 artifact
+### 9. 注册或上传 artifact
 
-P1 可先用 multipart 一步上传；P2 可升级为 presigned URL。
+无文件的结构化 artifact 使用 `/artifacts` JSON 接口；带文件的 artifact 使用 `/artifact-files` multipart 接口。生产环境由 API 将请求流直接写入私有 R2，并在同一流上计算大小和 SHA-256；客户端不得提交或读取 `storage_key`。
 
 ```http
-POST /worker/automation/runs/{run_id}/artifacts
+POST /worker/automation/runs/{run_id}/artifact-files
 Authorization: Bearer <device_token>
-Idempotency-Key: run_123:artifact:sha256
 Content-Type: multipart/form-data
 ```
 
@@ -666,24 +666,24 @@ Content-Type: multipart/form-data
 
 | 字段 | 说明 |
 | --- | --- |
-| `job_id` | job ID |
-| `result_id` | 业务结果 ID，可空 |
 | `artifact_type` | artifact 类型 |
-| `filename` | 原始文件名 |
-| `content_type` | MIME |
-| `sha256` | 文件 sha256 |
-| `metadata_json` | JSON 字符串 |
-| `file` | 文件内容 |
+| `metadata` | JSON 字符串，可空 |
+| `file` | 文件内容；文件名和 MIME 从 multipart part 读取 |
 
 响应：
 
 ```json
 {
   "artifact_id": "art_123",
-  "storage_key": "automation/job_123/run_123/art_123.pdf",
-  "status": "uploaded"
+  "artifact_type": "screenshot",
+  "filename": "result.png",
+  "content_type": "image/png",
+  "sha256": "...",
+  "size_bytes": 12345
 }
 ```
+
+下载端点由 API 校验当前 actor 对 artifact 所属 tenant 的 ownership，再从本地存储或私有 R2 返回内容；响应及列表均不暴露内部 `storage_key`。
 
 ### 10. 完成 run
 

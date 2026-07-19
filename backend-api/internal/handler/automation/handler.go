@@ -1,6 +1,7 @@
 package automation
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,8 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -26,23 +26,20 @@ import (
 	automationmodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/automation"
 	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
 	automationrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/automation"
+	artifactstore "github.com/Lucy-97/browser-agent/backend-api/internal/storage/artifact"
 )
 
 type Handler struct {
-	engine      *automationengine.Engine
-	workerAuth  *workerhandler.Handler
-	artifactDir string
+	engine     *automationengine.Engine
+	workerAuth *workerhandler.Handler
+	store      artifactstore.Store
 }
 
-func New(engine *automationengine.Engine, workerAuth *workerhandler.Handler, artifactDir string) *Handler {
-	if artifactDir == "" {
-		artifactDir = "artifacts"
+func New(engine *automationengine.Engine, workerAuth *workerhandler.Handler, store artifactstore.Store) *Handler {
+	if store == nil {
+		panic("artifact store is required")
 	}
-	absArtifactDir, err := filepath.Abs(artifactDir)
-	if err == nil {
-		artifactDir = absArtifactDir
-	}
-	return &Handler{engine: engine, workerAuth: workerAuth, artifactDir: artifactDir}
+	return &Handler{engine: engine, workerAuth: workerAuth, store: store}
 }
 
 func (handler *Handler) Register(mux *http.ServeMux) {
@@ -906,13 +903,24 @@ func (handler *Handler) trace(w http.ResponseWriter, r *http.Request) {
 		if artifact.ArtifactType != "agent_trace" {
 			continue
 		}
-		path, ok := handler.safeArtifactPath(artifact.LocalPath)
-		if !ok {
+		if artifact.StorageKey == "" {
 			break
 		}
-		raw, err := os.ReadFile(path)
+		object, err := handler.store.Get(r.Context(), artifact.StorageKey, "")
 		if err != nil {
-			basehandler.WriteError(w, http.StatusNotFound, "TRACE_FILE_NOT_FOUND", err.Error(), false)
+			status, retryable := artifactReadStatus(err)
+			basehandler.WriteError(w, status, "TRACE_FILE_NOT_FOUND", err.Error(), retryable)
+			return
+		}
+		defer object.Body.Close()
+		const maxTraceBytes = 16 << 20
+		raw, err := io.ReadAll(io.LimitReader(object.Body, maxTraceBytes+1))
+		if err != nil {
+			basehandler.WriteError(w, http.StatusBadGateway, "TRACE_READ_FAILED", err.Error(), true)
+			return
+		}
+		if len(raw) > maxTraceBytes {
+			basehandler.WriteError(w, http.StatusRequestEntityTooLarge, "TRACE_FILE_TOO_LARGE", "trace artifact exceeds 16 MiB", false)
 			return
 		}
 		var trace any
@@ -936,20 +944,49 @@ func (handler *Handler) downloadArtifact(w http.ResponseWriter, r *http.Request)
 	if !requestOwnsTenant(w, r, artifact.TenantID) {
 		return
 	}
-	path, ok := handler.safeArtifactPath(artifact.LocalPath)
-	if !ok {
-		basehandler.WriteError(w, http.StatusNotFound, "ARTIFACT_FILE_NOT_FOUND", "artifact file is not available locally", false)
+	if artifact.StorageKey == "" {
+		basehandler.WriteError(w, http.StatusNotFound, "ARTIFACT_FILE_NOT_FOUND", "artifact file is not available", false)
 		return
 	}
-	if _, err := os.Stat(path); err != nil {
-		basehandler.WriteError(w, http.StatusNotFound, "ARTIFACT_FILE_NOT_FOUND", err.Error(), false)
+	object, err := handler.store.Get(r.Context(), artifact.StorageKey, r.Header.Get("Range"))
+	if err != nil {
+		status, retryable := artifactReadStatus(err)
+		code := "ARTIFACT_STORAGE_UNAVAILABLE"
+		if status == http.StatusNotFound {
+			code = "ARTIFACT_FILE_NOT_FOUND"
+		} else if status == http.StatusRequestedRangeNotSatisfiable {
+			code = "INVALID_ARTIFACT_RANGE"
+		}
+		basehandler.WriteError(w, status, code, err.Error(), retryable)
 		return
 	}
-	if contentType := mime.TypeByExtension(filepath.Ext(path)); contentType != "" {
-		w.Header().Set("Content-Type", contentType)
+	defer object.Body.Close()
+
+	filename := artifactstore.SanitizeFilename(artifact.Filename)
+	contentType := artifact.ContentType
+	if contentType == "" {
+		contentType = object.ContentType
 	}
-	w.Header().Set("Content-Disposition", "inline; filename="+strconv.Quote(filepath.Base(path)))
-	http.ServeFile(w, r, path)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Accept-Ranges", "bytes")
+	if readSeeker, ok := object.Body.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, filename, object.LastModified, readSeeker)
+		return
+	}
+	if object.ContentLength >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(object.ContentLength, 10))
+	}
+	if object.ContentRange != "" {
+		w.Header().Set("Content-Range", object.ContentRange)
+		w.WriteHeader(http.StatusPartialContent)
+	}
+	_, _ = io.Copy(w, object.Body)
 }
 
 func (handler *Handler) manualActions(w http.ResponseWriter, r *http.Request) {
@@ -1082,6 +1119,11 @@ func (handler *Handler) createArtifact(w http.ResponseWriter, r *http.Request) {
 		basehandler.WriteError(w, http.StatusBadRequest, "INVALID_JSON", err.Error(), false)
 		return
 	}
+	artifact.StorageKey = ""
+	artifact.Filename = ""
+	artifact.ContentType = ""
+	artifact.SHA256 = ""
+	artifact.SizeBytes = nil
 	stored, err := handler.engine.CreateArtifact(r.PathValue("run_id"), artifact)
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -1092,50 +1134,143 @@ func (handler *Handler) createArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) uploadArtifactFile(w http.ResponseWriter, r *http.Request) {
-	if _, _, ok := handler.authorizedRun(w, r, r.PathValue("run_id")); !ok {
+	_, run, ok := handler.authorizedRun(w, r, r.PathValue("run_id"))
+	if !ok {
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 512<<20)
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	const maxArtifactBytes int64 = 512 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxArtifactBytes+(2<<20))
+	multipartReader, err := r.MultipartReader()
+	if err != nil {
 		basehandler.WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART", err.Error(), false)
 		return
 	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
+
+	var (
+		artifactType string
+		metadataRaw  string
+		storedObject artifactstore.StoredObject
+		filename     string
+		contentType  string
+		hash         = sha256.New()
+		counter      *countingReader
+		fileStored   bool
+	)
+	cleanupStoredObject := func() {
+		if !fileStored {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = handler.store.Delete(cleanupCtx, storedObject.Key)
+	}
+
+	for {
+		part, nextErr := multipartReader.NextPart()
+		if errors.Is(nextErr, io.EOF) {
+			break
+		}
+		if nextErr != nil {
+			cleanupStoredObject()
+			basehandler.WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART", nextErr.Error(), false)
+			return
+		}
+		formName := part.FormName()
+		switch formName {
+		case "artifact_type", "metadata":
+			raw, readErr := io.ReadAll(io.LimitReader(part, (1<<20)+1))
+			part.Close()
+			if readErr != nil || len(raw) > 1<<20 {
+				cleanupStoredObject()
+				basehandler.WriteError(w, http.StatusBadRequest, "INVALID_MULTIPART_FIELD", "artifact metadata field exceeds 1 MiB", false)
+				return
+			}
+			if formName == "artifact_type" {
+				artifactType = strings.TrimSpace(string(raw))
+			} else {
+				metadataRaw = string(raw)
+			}
+		case "file":
+			if fileStored {
+				part.Close()
+				cleanupStoredObject()
+				basehandler.WriteError(w, http.StatusBadRequest, "MULTIPLE_FILES_NOT_ALLOWED", "only one artifact file is allowed", false)
+				return
+			}
+			filename = artifactstore.SanitizeFilename(part.FileName())
+			contentType = normalizedContentType(part.Header.Get("Content-Type"), filename)
+			counter = &countingReader{reader: io.TeeReader(io.LimitReader(part, maxArtifactBytes+1), hash)}
+			storedObject, err = handler.store.Put(r.Context(), artifactstore.PutInput{
+				TenantID:    run.TenantID,
+				RunID:       run.ID,
+				Filename:    filename,
+				ContentType: contentType,
+				SizeBytes:   -1,
+				Body:        counter,
+			})
+			part.Close()
+			if err != nil {
+				var maxBytesError *http.MaxBytesError
+				if errors.As(err, &maxBytesError) {
+					basehandler.WriteError(w, http.StatusRequestEntityTooLarge, "ARTIFACT_TOO_LARGE", "artifact file exceeds 512 MiB", false)
+					return
+				}
+				basehandler.WriteError(w, http.StatusBadGateway, "ARTIFACT_SAVE_FAILED", err.Error(), true)
+				return
+			}
+			fileStored = true
+			if counter.count > maxArtifactBytes {
+				cleanupStoredObject()
+				basehandler.WriteError(w, http.StatusRequestEntityTooLarge, "ARTIFACT_TOO_LARGE", "artifact file exceeds 512 MiB", false)
+				return
+			}
+		default:
+			part.Close()
+		}
+	}
+	if !fileStored {
 		basehandler.WriteError(w, http.StatusBadRequest, "FILE_REQUIRED", "multipart field file is required", false)
 		return
 	}
-	defer file.Close()
-
-	artifactType := strings.TrimSpace(r.FormValue("artifact_type"))
 	if artifactType == "" {
 		artifactType = "file"
 	}
-	metadata := parseMetadataFormValue(r.FormValue("metadata"))
-	storedPath, sha, size, err := handler.saveArtifactFile(r.PathValue("run_id"), header.Filename, file)
-	if err != nil {
-		basehandler.WriteError(w, http.StatusInternalServerError, "ARTIFACT_SAVE_FAILED", err.Error(), true)
-		return
-	}
-	metadata["filename"] = header.Filename
-	metadata["content_type"] = header.Header.Get("Content-Type")
+	metadata := parseMetadataFormValue(metadataRaw)
+	metadata["filename"] = filename
+	metadata["content_type"] = contentType
+	sha := hex.EncodeToString(hash.Sum(nil))
+	size := counter.count
 
 	artifact, err := handler.engine.CreateArtifact(
 		r.PathValue("run_id"),
 		automationmodel.Artifact{
 			ArtifactType: artifactType,
-			LocalPath:    storedPath,
+			StorageKey:   storedObject.Key,
+			Filename:     filename,
+			ContentType:  contentType,
 			Metadata:     metadata,
 			SHA256:       sha,
 			SizeBytes:    &size,
 		},
 	)
 	if err != nil {
+		cleanupStoredObject()
 		status, code := mapAutomationError(err)
 		basehandler.WriteError(w, status, code, err.Error(), false)
 		return
 	}
 	basehandler.WriteJSON(w, http.StatusCreated, artifact)
+}
+
+type countingReader struct {
+	reader io.Reader
+	count  int64
+}
+
+func (reader *countingReader) Read(buffer []byte) (int, error) {
+	read, err := reader.reader.Read(buffer)
+	reader.count += int64(read)
+	return read, err
 }
 
 func (handler *Handler) createManualAction(w http.ResponseWriter, r *http.Request) {
@@ -1440,71 +1575,31 @@ func policyTemplates() []automationmodel.PolicyTemplate {
 	}
 }
 
-func (handler *Handler) saveArtifactFile(runID string, filename string, file io.Reader) (string, string, int64, error) {
-	cleanRunID := safePathSegment(runID)
-	cleanFilename := safeFilename(filename)
-	dir := filepath.Join(handler.artifactDir, cleanRunID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", "", 0, err
+func normalizedContentType(raw string, filename string) string {
+	mediaType, _, parseErr := mime.ParseMediaType(strings.TrimSpace(raw))
+	if parseErr == nil && mediaType != "" && mediaType != "application/octet-stream" {
+		return mediaType
 	}
-	path := filepath.Join(dir, cleanFilename)
-	if _, err := os.Stat(path); err == nil {
-		ext := filepath.Ext(cleanFilename)
-		base := strings.TrimSuffix(cleanFilename, ext)
-		path = filepath.Join(dir, base+"-"+strconv.FormatInt(time.Now().UnixNano(), 10)+ext)
-	}
-	output, err := os.Create(path)
-	if err != nil {
-		return "", "", 0, err
-	}
-	defer output.Close()
-
-	hash := sha256.New()
-	size, err := io.Copy(io.MultiWriter(output, hash), file)
-	if err != nil {
-		return "", "", 0, err
-	}
-	return path, hex.EncodeToString(hash.Sum(nil)), size, nil
-}
-
-func (handler *Handler) safeArtifactPath(rawPath string) (string, bool) {
-	if rawPath == "" {
-		return "", false
-	}
-	absPath, err := filepath.Abs(rawPath)
-	if err != nil {
-		return "", false
-	}
-	absRoot, err := filepath.Abs(handler.artifactDir)
-	if err != nil {
-		return "", false
-	}
-	rel, err := filepath.Rel(absRoot, absPath)
-	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." {
-		return "", false
-	}
-	return absPath, true
-}
-
-func safePathSegment(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "unknown"
-	}
-	return strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' || r == '.' {
-			return r
+	if detected := mime.TypeByExtension(path.Ext(filename)); detected != "" {
+		if mediaType, _, err := mime.ParseMediaType(detected); err == nil {
+			return mediaType
 		}
-		return '-'
-	}, value)
+	}
+	if parseErr == nil && mediaType != "" {
+		return mediaType
+	}
+	return "application/octet-stream"
 }
 
-func safeFilename(value string) string {
-	name := filepath.Base(strings.TrimSpace(value))
-	if name == "." || name == "/" || name == "" {
-		name = "artifact.bin"
+func artifactReadStatus(err error) (int, bool) {
+	switch {
+	case errors.Is(err, artifactstore.ErrNotFound):
+		return http.StatusNotFound, false
+	case errors.Is(err, artifactstore.ErrInvalidRange):
+		return http.StatusRequestedRangeNotSatisfiable, false
+	default:
+		return http.StatusBadGateway, true
 	}
-	return safePathSegment(name)
 }
 
 func stringFromMetadata(metadata map[string]any, key string) string {

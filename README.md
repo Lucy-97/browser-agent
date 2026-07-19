@@ -4,6 +4,7 @@
 
 ## Changelog
 
+- 2026-07-20：生产 artifact 存储切换为私有 Cloudflare R2：API 新增 `local`/`r2` 存储抽象、流式 multipart 上传、租户鉴权下载代理、对象 key 隔离、R2 Secret 注入和部署前配置校验；本地开发继续默认使用本地存储。
 - 2026-07-19：建立生产化 Phase 2 部署基线：新增受支持的生产 Compose、不可变 GHCR 镜像发布、Secret 文件注入、MySQL migration job、MySQL/Redis TLS 校验、健康检查、资源限制和按 commit SHA 部署/回滚手册；对象存储、备份恢复与 staging E2E 仍是上线阻断项。
 - 2026-07-19：完成生产化 Phase 1 客户身份主链路：邮箱密码注册/登录、租户 owner 创建、JWT + HttpOnly Cookie、active membership 校验、登录限流、登录后 Worker 配对 UI 和本地 Web → Gateway → API 验收；成员管理仍留待封闭内测运营能力补齐。
 - 2026-07-19：新增线上客户交付与生产化技术方案，明确首期采用“云端控制面 + 客户本机 Worker”，并将账号租户隔离、生产部署和 Worker 交付列为上线门禁。
@@ -59,7 +60,7 @@ Linux/macOS 上，前端和本机 API 默认在宿主机通过 tmux 启动。前
 
 当前仓库已完成本地 Web → API → Worker → Admin 基础链路验证，并建立 `deploy/production/compose.yaml` 生产部署基线。首期线上形态统一采用“云端 Web/Gateway/API/数据服务 + 客户本机 Worker”：第三方平台登录态和浏览器 profile 默认留在客户设备，Worker 仅通过出站 HTTPS 访问云端；Admin 在独立身份/RBAC 完成前不进入公网生产服务。
 
-生产化的实施阶段、信任边界、账号租户模型、对象存储、Worker 安装升级、监控告警和上线门禁见 [Browser Agent 线上客户交付与生产化技术方案](docs/tech/0719-browser-agent-productionization-plan.md)，实际部署步骤见 [生产 Compose 部署运行手册](docs/deploy/0719-production-compose-runbook.md)。客户身份与部署骨架已落地；对象存储、备份恢复、目标云资源和 staging E2E 完成前，仍不得面向客户开放。
+生产化的实施阶段、信任边界、账号租户模型、对象存储、Worker 安装升级、监控告警和上线门禁见 [Browser Agent 线上客户交付与生产化技术方案](docs/tech/0719-browser-agent-productionization-plan.md)，实际部署步骤见 [生产 Compose 部署运行手册](docs/deploy/0719-production-compose-runbook.md)。客户身份、部署骨架和私有 R2 存储代码路径已落地；备份恢复、目标云资源、R2 实桶验收和 staging E2E 完成前，仍不得面向客户开放。
 
 ## 三、 核心微服务架构
 
@@ -151,7 +152,7 @@ docker compose -f deploy-local/docker-compose-backend.yaml exec -T ai-engine ...
 docker compose -f deploy-local/docker-compose-backend.yaml up -d --force-recreate <service>
 ```
 
-*   本地若未配置 `R2_CUSTOM_DOMAIN`，R2 presign 只保证上传可用；不要把 `*.r2.cloudflarestorage.com/<bucket>/...` 当作浏览器公开 URL 使用，前端应使用临时预览 URL 或本地 blob 缓存展示。
+*   本地开发默认使用 `ARTIFACT_STORE=local`；生产 Compose 固定使用私有 R2。R2 bucket 不开启 `r2.dev` 或公开自定义域名，前端只能通过完成租户 ownership 校验的 API 下载 artifact，不得拼接或保存公共永久 URL。
 
 ## 六、 文档治理与 Roadmap
 
@@ -192,7 +193,7 @@ docker compose -f deploy-local/docker-compose-backend.yaml up -d --force-recreat
 
 #### `docs/deploy/`
 
-- [0719-production-compose-runbook.md](docs/deploy/0719-production-compose-runbook.md)：生产 Compose 的资源准备、不可变镜像、Secret、MySQL/Redis TLS、migration、部署、验证、回滚和剩余上线门禁。
+- [0719-production-compose-runbook.md](docs/deploy/0719-production-compose-runbook.md)：生产 Compose 的资源准备、不可变镜像、Secret、MySQL/Redis TLS、私有 Cloudflare R2、migration、部署、验证、回滚和剩余上线门禁。
 
 #### `docs/`
 

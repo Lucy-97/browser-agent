@@ -3,10 +3,9 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/Lucy-97/browser-agent/backend-api/internal/config"
@@ -84,9 +83,19 @@ func TestAutomationMockJobLifecycle(t *testing.T) {
 	artifactResp := postJSON(t, server, "/worker/automation/runs/"+runID+"/artifacts", map[string]any{
 		"artifact_type": "mock.summary",
 		"metadata":      map[string]any{"ok": true},
+		"local_path":    "../../should-never-be-trusted",
 	}, token)
 	if artifactResp.Code != http.StatusCreated {
 		t.Fatalf("artifact status = %d body=%s", artifactResp.Code, artifactResp.Body.String())
+	}
+	var metadataArtifact map[string]any
+	decodeJSON(t, artifactResp, &metadataArtifact)
+	if _, leaked := metadataArtifact["local_path"]; leaked {
+		t.Fatalf("metadata artifact leaked worker local_path: %#v", metadataArtifact)
+	}
+	metadataDownload := getJSON(t, server, "/admin/automation/artifacts/"+metadataArtifact["artifact_id"].(string)+"/download", "")
+	if metadataDownload.Code != http.StatusNotFound {
+		t.Fatalf("metadata artifact download status = %d body=%s", metadataDownload.Code, metadataDownload.Body.String())
 	}
 
 	completeResp := postJSON(t, server, "/worker/automation/runs/"+runID+"/complete", map[string]any{
@@ -155,19 +164,32 @@ func TestAutomationTraceAndCancel(t *testing.T) {
 	decodeJSON(t, nextResp, &job)
 	runID := job["run_id"].(string)
 
-	tracePath := filepath.Join(artifactDir, runID, "agent-trace.json")
-	if err := os.MkdirAll(filepath.Dir(tracePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(tracePath, []byte(`{"steps":[{"step":"action.start","action":"observe_page"}]}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	artifactResp := postJSON(t, server, "/worker/automation/runs/"+runID+"/artifacts", map[string]any{
-		"artifact_type": "agent_trace",
-		"local_path":    tracePath,
-	}, token)
+	artifactResp := postArtifactFile(
+		t,
+		server,
+		"/worker/automation/runs/"+runID+"/artifact-files",
+		"agent_trace",
+		"agent-trace.json",
+		[]byte(`{"steps":[{"step":"action.start","action":"observe_page"}]}`),
+		token,
+	)
 	if artifactResp.Code != http.StatusCreated {
 		t.Fatalf("artifact status = %d body=%s", artifactResp.Code, artifactResp.Body.String())
+	}
+	var uploadedArtifact map[string]any
+	decodeJSON(t, artifactResp, &uploadedArtifact)
+	if uploadedArtifact["filename"] != "agent-trace.json" || uploadedArtifact["content_type"] != "application/json" {
+		t.Fatalf("uploaded artifact metadata = %#v", uploadedArtifact)
+	}
+	if _, leaked := uploadedArtifact["storage_key"]; leaked {
+		t.Fatalf("uploaded artifact leaked storage key: %#v", uploadedArtifact)
+	}
+	downloadReq := httptest.NewRequest(http.MethodGet, "/admin/automation/artifacts/"+uploadedArtifact["artifact_id"].(string)+"/download", nil)
+	downloadReq.Header.Set("Range", "bytes=0-6")
+	downloadResp := httptest.NewRecorder()
+	server.ServeHTTP(downloadResp, downloadReq)
+	if downloadResp.Code != http.StatusPartialContent || downloadResp.Body.String() != `{"steps` {
+		t.Fatalf("artifact range download status = %d body=%q", downloadResp.Code, downloadResp.Body.String())
 	}
 
 	traceResp := getJSON(t, server, "/admin/automation/runs/"+runID+"/trace", "")
@@ -702,6 +724,33 @@ func postJSON(t *testing.T, handler http.Handler, path string, payload map[strin
 	}
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	return resp
+}
+
+func postArtifactFile(t *testing.T, handler http.Handler, requestPath string, artifactType string, filename string, content []byte, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("artifact_type", artifactType); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, requestPath, body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

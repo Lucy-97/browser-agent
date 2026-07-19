@@ -11,7 +11,13 @@ import (
 
 type Config struct {
 	Addr                   string
+	ArtifactStore          string
 	ArtifactDir            string
+	R2AccountID            string
+	R2Bucket               string
+	R2AccessKeyID          string
+	R2SecretAccessKey      string
+	R2Prefix               string
 	InternalSecret         string
 	AdminAPIToken          string
 	WebAPIToken            string
@@ -44,7 +50,13 @@ func Load() Config {
 	}
 	return Config{
 		Addr:                   addr,
+		ArtifactStore:          envString("ARTIFACT_STORE", "local"),
 		ArtifactDir:            os.Getenv("ARTIFACT_DIR"),
+		R2AccountID:            os.Getenv("R2_ACCOUNT_ID"),
+		R2Bucket:               os.Getenv("R2_BUCKET"),
+		R2AccessKeyID:          envOrFile("R2_ACCESS_KEY_ID"),
+		R2SecretAccessKey:      envOrFile("R2_SECRET_ACCESS_KEY"),
+		R2Prefix:               envString("R2_PREFIX", "artifacts"),
 		InternalSecret:         envOrFile("INTERNAL_SECRET"),
 		AdminAPIToken:          os.Getenv("ADMIN_API_TOKEN"),
 		WebAPIToken:            os.Getenv("WEB_API_TOKEN"),

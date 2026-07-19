@@ -24,7 +24,7 @@ type Run = {
 type Artifact = {
   artifact_id: string;
   artifact_type: string;
-  local_path?: string;
+  filename?: string;
   metadata?: Record<string, unknown>;
   size_bytes?: number | null;
   created_at?: string;
@@ -339,7 +339,7 @@ function RunDetail({ run, job, task, url }: { run: Run; job: Job; task: string; 
                         color: "var(--primary, #214f6b)",
                         textDecoration: "underline",
                       }}
-                      title={artifact.local_path || artifact.artifact_type}
+                      title={artifact.filename || artifact.artifact_type}
                     >
                       打开截图
                     </a>
@@ -375,7 +375,7 @@ function RunDetail({ run, job, task, url }: { run: Run; job: Job; task: string; 
                         color: "var(--primary, #214f6b)",
                         textDecoration: "underline",
                       }}
-                      title={artifact.local_path || artifact.artifact_type}
+                      title={artifact.filename || artifact.artifact_type}
                     >
                       打开 trace
                     </a>

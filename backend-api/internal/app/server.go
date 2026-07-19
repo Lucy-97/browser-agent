@@ -21,6 +21,7 @@ import (
 	authrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/auth"
 	automationrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/automation"
 	workerrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/worker"
+	artifactstore "github.com/Lucy-97/browser-agent/backend-api/internal/storage/artifact"
 )
 
 type Server struct {
@@ -50,7 +51,8 @@ func NewServerWithConfig(cfg config.Config) *Server {
 	})
 
 	workerHandler := workerhandler.New(workerEngine)
-	automationHandler := automationhandler.New(automationEngine, workerHandler, cfg.ArtifactDir)
+	artifactStore := buildArtifactStore(cfg)
+	automationHandler := automationhandler.New(automationEngine, workerHandler, artifactStore)
 	authHandler := authhandler.New(authEngine, authhandler.Options{
 		CookieName: cfg.AuthCookieName, CookieSecure: cfg.AuthCookieSecure,
 	})
@@ -63,6 +65,31 @@ func NewServerWithConfig(cfg config.Config) *Server {
 	})
 
 	return &Server{handler: withLocalCORS(withRoleAuth(withActorIdentity(mux, cfg, authEngine), cfg))}
+}
+
+func buildArtifactStore(cfg config.Config) artifactstore.Store {
+	var (
+		store artifactstore.Store
+		err   error
+	)
+	switch strings.ToLower(strings.TrimSpace(cfg.ArtifactStore)) {
+	case "", "local":
+		store, err = artifactstore.NewLocalStore(cfg.ArtifactDir)
+	case "r2":
+		store, err = artifactstore.NewR2Store(artifactstore.R2Config{
+			AccountID:       cfg.R2AccountID,
+			Bucket:          cfg.R2Bucket,
+			AccessKeyID:     cfg.R2AccessKeyID,
+			SecretAccessKey: cfg.R2SecretAccessKey,
+			Prefix:          cfg.R2Prefix,
+		})
+	default:
+		panic("unsupported ARTIFACT_STORE: " + cfg.ArtifactStore)
+	}
+	if err != nil {
+		panic(err)
+	}
+	return store
 }
 
 func buildRepositories(cfg config.Config) (workerengine.Repository, automationengine.Repository, authengine.Repository) {

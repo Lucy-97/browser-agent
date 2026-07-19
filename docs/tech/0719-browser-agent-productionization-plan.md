@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-20：选定 Cloudflare R2 并完成生产 artifact 存储适配：私有 bucket、流式上传、租户鉴权下载代理、对象 key 隔离、R2 Secret 和生产环境校验已落地；实际云 bucket、留存删除、告警和 staging E2E 尚待验收。
 - 2026-07-19：落地 Phase 2 第一批生产基线：统一生产 Compose 入口、完整 commit SHA 镜像发布、文件 Secret、MySQL migration job、MySQL/Redis TLS、健康检查、资源限制和手动部署/回滚；实际云资源、对象存储、备份恢复和 staging E2E 尚待完成。
 - 2026-07-19：完成 Phase 1 客户身份主链路：`users` schema/migration、邮箱密码注册登录、租户 owner 创建、JWT + HttpOnly Cookie、active membership 在线校验、登录路径限流、登录/Worker 配对 Web UI 和本地 Gateway 端到端验收。
 - 2026-07-19：同步 Phase 1 首批实现：新增租户 schema/migration、Automation/Worker resource ownership、可信 Gateway 身份头、严格配对批准与双租户越权测试；真实账号登录和 membership 校验尚未完成。
@@ -84,9 +85,9 @@ flowchart LR
 | 身份与权限 | 已有 user/tenant/membership、邮箱密码登录、JWT/HttpOnly Cookie、active membership 校验、最小角色集和完整 resource ownership | 缺成员邀请/移除、密码找回、邮箱验证、MFA/SSO 和 platform admin 独立身份流程 |
 | Worker 身份 | 严格模式下配对必须由 tenant owner/platform admin 批准；登录后 Web 配对 UI、device token、心跳、租户一致性和 revoke 已接通 | 缺客户化安装、安全凭据存储和升级 |
 | API 入口 | Gateway 已代理 `/api/v1/auth/*`、`/web/*`、`/admin/*`、`/worker/*`，校验 Cookie/JWT、清除外部身份头并注入租户 actor；登录注册有独立 IP 限流 | 缺生产域名、TLS/WAF、安全响应头完善和 staging 部署验收 |
-| 部署 | 有本地 Compose、生产 Compose 草案和 K3s 骨架 | 默认凭据、端口暴露、健康检查、变量、镜像版本和服务清单未形成可验收发布物 |
-| Artifact | API 支持上传、记录和下载，本地有请求大小上限 | 主要依赖本地文件路径，缺对象存储、租户级授权、留存、删除、扫描和容量配额 |
-| 数据 | MySQL schema 和 migration 已存在，Redis 用于 claim lock | 缺自动 migration job、托管备份、恢复演练、连接和容量告警 |
+| 部署 | 已有唯一生产 Compose、不可变 GHCR 镜像、文件 Secret、健康检查、资源限制、migration 和 SHA 回滚入口 | 缺实际云资源、固定域名/TLS/WAF、云 Secret Manager 和 staging 验收 |
+| Artifact | 本地使用文件存储；生产使用私有 R2，支持流式上传、租户/run key 隔离、SHA-256、租户鉴权 API 下载和 Range | 缺实际 R2 bucket 验收、留存删除、恶意内容扫描、容量配额和故障告警 |
+| 数据 | MySQL schema、幂等 migration job 和 Redis claim lock 已存在 | 缺托管备份、恢复演练、连接和容量告警 |
 | 安全策略 | Worker 有 `allowed_domains`、`allowed_actions`、timeout 等 policy gate | 部分 Web 入口仍使用通配域名；缺内网地址阻断、租户限流和统一高风险动作确认 |
 | 可观测性 | 有健康检查、Worker 心跳、run 状态和日志 | 缺集中日志、核心指标、告警、前端错误采集和线上 trace 关联 |
 | CI/CD | Go 与前端已有基础构建测试 | Worker 未纳入完整 CI，缺镜像构建/扫描/推送、staging、部署、回滚和线上 E2E |
@@ -190,7 +191,7 @@ flowchart LR
 Artifact object key 必须包含不可猜测的租户和 run 隔离前缀，例如：
 
 ```text
-tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
+artifacts/tenants/{tenant_id}/runs/{run_id}/{uuid}-{sanitized_filename}
 ```
 
 数据库只保存对象 key、大小、哈希、MIME、创建人、保留策略和扫描状态，不保存公共永久 URL。
@@ -300,7 +301,8 @@ tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
 
 - [x] 确定首期采用云端控制面 + 客户本机 Worker。
 - [x] 记录现有部署、安全和运维缺口。
-- [ ] 确定域名、云环境、身份方案、对象存储和封闭内测客户范围。
+- [x] 确定对象存储采用 Cloudflare R2 私有 bucket。
+- [ ] 确定域名、云环境、身份方案和封闭内测客户范围。
 
 ### Phase 1：身份与租户隔离（上线阻断）
 
@@ -315,7 +317,9 @@ tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
 ### Phase 2：生产基础设施与数据（上线阻断）
 
 - [ ] 建立 staging/production 环境和固定域名/TLS。
-- [ ] 接入托管 MySQL、Redis、对象存储和 Secret Manager。
+- [ ] 接入实际托管 MySQL、Redis 和 Secret Manager。
+- [x] 实现 Cloudflare R2 存储适配、生产配置与部署前校验；下载统一经过租户鉴权 API 代理。
+- [ ] 创建 staging/production 私有 R2 bucket 与最小权限 token，并完成线上上传、下载和故障验收。
 - [ ] 建立 migration job、自动备份和恢复演练。
 - [x] 修复并统一当前应用配置，选择 `deploy/production/compose.yaml` 作为唯一受支持的生产入口；K3s 保留为实验草案。
 - [x] 完成 API/Gateway/Web 的不可变 GHCR 镜像构建/推送，以及基于完整 commit SHA 的部署和手动回滚入口。
@@ -363,7 +367,7 @@ tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
 ### 数据与可靠性
 
 - [ ] MySQL、Redis 和对象存储不直接暴露公网。
-- [ ] Artifact 使用对象存储和短时授权下载。
+- [x] Artifact 生产代码使用私有 R2 和租户鉴权受控流式下载，不暴露存储 key 或公共永久 URL。
 - [ ] migration、备份、恢复和删除流程完成演练。
 - [ ] 服务具有 readiness/liveness、资源限制和异常重启策略。
 - [ ] 发布可使用不可变版本回滚。
@@ -380,7 +384,7 @@ tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
 
 - 提供全局和租户级任务暂停开关，事故期间停止新任务领取。
 - 支持立即 revoke 单个设备或租户全部设备 token。
-- 对象存储下载默认私有，可在异常时关闭签名 URL 生成。
+- 对象存储保持私有；异常时可在 Gateway 临时关闭 artifact 下载路径或撤销 R2 token。
 - Gateway 可按路径、租户和 IP 临时限流或阻断。
 - 应用回滚不依赖破坏性数据库回滚；schema 采用向前兼容迁移。
 - 对疑似凭据泄露执行 secret 轮换、会话失效、审计检索和客户通知流程。

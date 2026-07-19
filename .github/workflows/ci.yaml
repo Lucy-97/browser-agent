@@ -61,11 +61,14 @@ jobs:
           bash -n check-env.sh deploy.sh migrate.sh
           cp .env.example .env
           sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${GITHUB_SHA}/" .env
+          sed -i "s/^R2_ACCOUNT_ID=.*/R2_ACCOUNT_ID=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/" .env
           mkdir -p secrets
           openssl rand -hex 32 > secrets/jwt_secret.txt
           openssl rand -hex 32 > secrets/internal_api_secret.txt
           openssl rand -hex 24 > secrets/db_password.txt
           openssl rand -hex 24 > secrets/redis_password.txt
+          openssl rand -hex 16 > secrets/r2_access_key_id.txt
+          openssl rand -hex 32 > secrets/r2_secret_access_key.txt
           printf 'browser_agent:secret@tcp(mysql.example.internal:3306)/browser_agent?parseTime=true&tls=true\n' > secrets/mysql_dsn.txt
           PRODUCTION_ENV_FILE="$PWD/.env" bash check-env.sh
           docker compose --env-file .env -f compose.yaml config --quiet

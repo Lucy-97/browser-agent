@@ -44,7 +44,12 @@ services:
     pull_policy: always
     environment:
       API_ADDR: ":8001"
-      ARTIFACT_DIR: /var/lib/browser-agent/artifacts
+      ARTIFACT_STORE: r2
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:?set R2_ACCOUNT_ID}
+      R2_BUCKET: ${R2_BUCKET:?set R2_BUCKET}
+      R2_PREFIX: ${R2_PREFIX:-artifacts}
+      R2_ACCESS_KEY_ID_FILE: /run/secrets/r2_access_key_id
+      R2_SECRET_ACCESS_KEY_FILE: /run/secrets/r2_secret_access_key
       INTERNAL_SECRET_FILE: /run/secrets/internal_api_secret
       JWT_SECRET_FILE: /run/secrets/jwt_secret
       MYSQL_DSN_FILE: /run/secrets/mysql_dsn
@@ -68,8 +73,8 @@ services:
       - jwt_secret
       - mysql_dsn
       - redis_password
-    volumes:
-      - artifact_data:/var/lib/browser-agent/artifacts
+      - r2_access_key_id
+      - r2_secret_access_key
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     read_only: true
@@ -166,9 +171,6 @@ networks:
   backend:
     driver: bridge
 
-volumes:
-  artifact_data:
-
 secrets:
   jwt_secret:
     file: ${JWT_SECRET_FILE:?set JWT_SECRET_FILE}
@@ -180,3 +182,7 @@ secrets:
     file: ${DB_PASSWORD_FILE:?set DB_PASSWORD_FILE}
   redis_password:
     file: ${REDIS_PASSWORD_FILE:?set REDIS_PASSWORD_FILE}
+  r2_access_key_id:
+    file: ${R2_ACCESS_KEY_ID_FILE:?set R2_ACCESS_KEY_ID_FILE}
+  r2_secret_access_key:
+    file: ${R2_SECRET_ACCESS_KEY_FILE:?set R2_SECRET_ACCESS_KEY_FILE}

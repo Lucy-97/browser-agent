@@ -398,9 +398,9 @@ func (repo *MySQLRepository) CreateArtifact(runID string, artifact automationmod
 		runID,
 		run.TenantID,
 		artifact.ArtifactType,
-		artifact.LocalPath,
-		"",
-		"",
+		artifact.StorageKey,
+		artifact.Filename,
+		artifact.ContentType,
 		artifact.SizeBytes,
 		artifact.SHA256,
 		mustJSON(mapOrEmpty(artifact.Metadata)),
@@ -413,7 +413,7 @@ func (repo *MySQLRepository) CreateArtifact(runID string, artifact automationmod
 func (repo *MySQLRepository) Artifacts(runID string) ([]automationmodel.Artifact, error) {
 	rows, err := repo.db.QueryContext(
 		context.Background(),
-		`SELECT id, run_id, tenant_id, artifact_type, storage_key, size_bytes, sha256, metadata_json, created_at
+		`SELECT id, run_id, tenant_id, artifact_type, storage_key, filename, content_type, size_bytes, sha256, metadata_json, created_at
 		 FROM automation_artifact
 		 WHERE run_id = ?
 		 ORDER BY created_at ASC`,
@@ -426,7 +426,9 @@ func (repo *MySQLRepository) Artifacts(runID string) ([]automationmodel.Artifact
 	artifacts := make([]automationmodel.Artifact, 0)
 	for rows.Next() {
 		var artifact automationmodel.Artifact
-		var localPath sql.NullString
+		var storageKey sql.NullString
+		var filename sql.NullString
+		var contentType sql.NullString
 		var sha sql.NullString
 		var size sql.NullInt64
 		var metadataRaw []byte
@@ -435,7 +437,9 @@ func (repo *MySQLRepository) Artifacts(runID string) ([]automationmodel.Artifact
 			&artifact.RunID,
 			&artifact.TenantID,
 			&artifact.ArtifactType,
-			&localPath,
+			&storageKey,
+			&filename,
+			&contentType,
 			&size,
 			&sha,
 			&metadataRaw,
@@ -443,7 +447,9 @@ func (repo *MySQLRepository) Artifacts(runID string) ([]automationmodel.Artifact
 		); err != nil {
 			return nil, err
 		}
-		artifact.LocalPath = localPath.String
+		artifact.StorageKey = storageKey.String
+		artifact.Filename = filename.String
+		artifact.ContentType = contentType.String
 		artifact.SHA256 = sha.String
 		if size.Valid {
 			artifact.SizeBytes = &size.Int64
@@ -457,7 +463,7 @@ func (repo *MySQLRepository) Artifacts(runID string) ([]automationmodel.Artifact
 func (repo *MySQLRepository) Artifact(artifactID string) (automationmodel.Artifact, error) {
 	row := repo.db.QueryRowContext(
 		context.Background(),
-		`SELECT id, run_id, tenant_id, artifact_type, storage_key, size_bytes, sha256, metadata_json, created_at
+		`SELECT id, run_id, tenant_id, artifact_type, storage_key, filename, content_type, size_bytes, sha256, metadata_json, created_at
 		 FROM automation_artifact
 		 WHERE id = ?`,
 		artifactID,
@@ -758,7 +764,9 @@ func scanRun(row scanner) (automationmodel.Run, error) {
 
 func scanArtifact(row scanner) (automationmodel.Artifact, error) {
 	var artifact automationmodel.Artifact
-	var localPath sql.NullString
+	var storageKey sql.NullString
+	var filename sql.NullString
+	var contentType sql.NullString
 	var sha sql.NullString
 	var size sql.NullInt64
 	var metadataRaw []byte
@@ -767,7 +775,9 @@ func scanArtifact(row scanner) (automationmodel.Artifact, error) {
 		&artifact.RunID,
 		&artifact.TenantID,
 		&artifact.ArtifactType,
-		&localPath,
+		&storageKey,
+		&filename,
+		&contentType,
 		&size,
 		&sha,
 		&metadataRaw,
@@ -776,7 +786,9 @@ func scanArtifact(row scanner) (automationmodel.Artifact, error) {
 	if err != nil {
 		return automationmodel.Artifact{}, err
 	}
-	artifact.LocalPath = localPath.String
+	artifact.StorageKey = storageKey.String
+	artifact.Filename = filename.String
+	artifact.ContentType = contentType.String
 	artifact.SHA256 = sha.String
 	if size.Valid {
 		artifact.SizeBytes = &size.Int64

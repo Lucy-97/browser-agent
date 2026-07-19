@@ -89,7 +89,9 @@ type Artifact struct {
 	RunID        string         `json:"run_id"`
 	TenantID     string         `json:"tenant_id"`
 	ArtifactType string         `json:"artifact_type"`
-	LocalPath    string         `json:"local_path,omitempty"`
+	StorageKey   string         `json:"-"`
+	Filename     string         `json:"filename,omitempty"`
+	ContentType  string         `json:"content_type,omitempty"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
 	SHA256       string         `json:"sha256,omitempty"`
 	SizeBytes    *int64         `json:"size_bytes,omitempty"`

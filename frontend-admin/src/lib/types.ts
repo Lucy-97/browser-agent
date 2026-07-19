@@ -47,7 +47,7 @@ export type Artifact = {
   artifact_id: string;
   run_id: string;
   artifact_type: string;
-  local_path?: string;
+  filename?: string;
   size_bytes?: number;
   created_at: string;
   metadata?: Record<string, unknown>;
@@ -72,4 +72,3 @@ export type TraceStep = {
   params?: Record<string, unknown>;
   [key: string]: unknown;
 };
-

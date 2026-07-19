@@ -211,7 +211,7 @@ function ArtifactsPanel({ artifacts }: { artifacts: Artifact[] }) {
             <div>
               <div className="artifact-type">{artifact.artifact_type}</div>
               <div className="artifact-meta">{formatBytes(artifact.size_bytes)} · {formatDateTime(artifact.created_at)}</div>
-              <div className="truncate mono">{artifact.local_path || "-"}</div>
+              <div className="truncate mono">{artifact.filename || "-"}</div>
             </div>
             <a
               className="icon-link"

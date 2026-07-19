@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-20：生产 artifact 持久化切换为私有 Cloudflare R2，补充 bucket/token 最小权限、R2 Secret 文件、配置校验以及上传下载验收步骤；生产 API 不再依赖单机 artifact volume。
 - 2026-07-19：建立首个受支持的生产部署入口，覆盖不可变镜像、环境校验、文件 Secret、托管 MySQL/Redis TLS、数据库迁移、健康检查、资源限制、部署与按 SHA 回滚。
 
 ## 1. 适用范围与当前状态
@@ -17,6 +18,7 @@
   -> Compose 内部 Gateway:8080
   -> Compose 内部 API:8001
   -> 托管 MySQL（验证 TLS）/ 托管 Redis（验证 TLS）
+  -> 私有 Cloudflare R2（S3 API）
 ```
 
 ## 2. 上线前准备
@@ -27,7 +29,9 @@
 2. 一个已解析到入口层的正式域名，以及 Caddy、Traefik、云负载均衡或 CDN 提供的有效 HTTPS/WAF。
 3. 可通过 TLS 访问的托管 MySQL 8 数据库和托管 Redis，二者均不得直接暴露公网。
 4. 可拉取 `ghcr.io/lucy-97/browser-agent-{api,gateway,web}:<commit-sha>` 的 GHCR 凭据。
-5. 独立的 staging 与 production 配置、数据库、Redis、Secret 和域名；禁止复用本地开发密码。
+5. 一个私有 Cloudflare R2 bucket。bucket 名称使用 3–63 位小写字母、数字或连字符，不开启 `r2.dev` 公开访问或公共自定义域名。
+6. 一组仅授予该 bucket `Object Read & Write` 权限的 R2 API token；staging 与 production 使用不同 bucket 和 token。
+7. 独立的 staging 与 production 配置、数据库、Redis、Secret 和域名；禁止复用本地开发密码。
 
 生产镜像由 `.github/workflows/release-images.yaml` 在 `main` 更新后发布，tag 固定为完整 40 位 commit SHA，不发布或使用 `latest`。
 
@@ -47,6 +51,16 @@ openssl rand -base64 36 > secrets/redis_password.txt
 chmod 600 secrets/*
 ```
 
+从 Cloudflare R2 控制台取得 Access Key ID 和 Secret Access Key 后，分别写入以下文件；不要把凭据粘贴进 `.env`、命令历史或仓库：
+
+```bash
+read -rsp "R2 Access Key ID: " value && printf '%s' "$value" > secrets/r2_access_key_id.txt && unset value
+echo
+read -rsp "R2 Secret Access Key: " value && printf '%s' "$value" > secrets/r2_secret_access_key.txt && unset value
+echo
+chmod 600 secrets/r2_*.txt
+```
+
 按托管数据库实际信息创建 `secrets/mysql_dsn.txt`。DSN 必须开启 Go MySQL Driver 的证书和主机名校验：
 
 ```text
@@ -60,6 +74,11 @@ browser_agent:<password>@tcp(mysql.example.internal:3306)/browser_agent?parseTim
 - `DB_SSL_MODE`：只允许 `VERIFY_CA` 或 `VERIFY_IDENTITY`。
 - `REDIS_REQUIRED=true`、`REDIS_TLS_ENABLED=true`。
 - `REDIS_TLS_SERVER_NAME`：Redis 证书覆盖的 DNS 名称。
+- `R2_ACCOUNT_ID`：Cloudflare Account ID，32 位十六进制字符串。
+- `R2_BUCKET`：已创建的私有 bucket 名称。
+- `R2_PREFIX`：对象 key 的相对前缀，默认 `artifacts`。
+
+API 使用 `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` 和 region `auto` 访问 R2。数据库只保存私有对象 key；对象按 `artifacts/tenants/{tenant_id}/runs/{run_id}/{uuid}-{filename}` 隔离。上传直接从请求流进入 R2，并计算 SHA-256；下载先验证租户 ownership，再由 API 返回受控流，不向浏览器泄露 R2 凭据、存储 key 或永久公共 URL。
 
 `secrets/` 与 `.env` 已被 Git 忽略。当前文件挂载是单机 Compose 的过渡方案；正式托管环境应由云 Secret Manager 在部署时生成这些只读文件，不能把 Secret 写入仓库、镜像或 CI 日志。
 
@@ -97,7 +116,7 @@ bash deploy.sh logs
 curl --fail --show-error https://app.example.com/
 ```
 
-staging 还必须完成登录、Worker 配对、创建任务、客户本机 Worker 领取/回写以及 artifact 下载的端到端验收。
+staging 还必须完成登录、Worker 配对、创建任务、客户本机 Worker 领取/回写以及 artifact 上传、Range 下载的端到端验收。验收时确认 R2 对象位于正确租户/run 前缀，另一租户无法读取该 artifact，关闭 bucket 公开访问后下载仍可通过已登录 API 正常完成。
 
 回滚时把 `.env` 的 `IMAGE_TAG` 改为上一个已发布的完整 commit SHA，再运行：
 
@@ -111,8 +130,8 @@ bash deploy.sh deploy
 
 本次交付是生产部署基线，不等于已完成公开上线。以下事项未完成前，只能用于 staging：
 
-- artifact 仍写入单机 Docker volume，尚未接入 S3/R2 对象存储和短时授权下载。
-- 托管 MySQL 自动备份、恢复演练和 artifact 备份尚未验收。
+- R2 代码路径和生产配置已接通，但实际 bucket/token、故障告警、留存删除与 staging 上传下载尚未验收。
+- 托管 MySQL 自动备份、恢复演练和 R2 数据恢复策略尚未验收。
 - 固定域名、TLS/WAF、云 Secret Manager 和实际托管 MySQL/Redis 尚未在目标云环境落地。
 - staging 的 Web → Gateway → API → 客户 Worker 全链路尚未执行线上形态 E2E。
 - Admin 独立身份/RBAC、Windows Worker 签名安装包与升级机制仍在后续阶段。
