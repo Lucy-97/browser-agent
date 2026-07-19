@@ -6,12 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "$0")"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$ROOT_DIR/deploy-local/tools/load-env.sh"
-PREFIX="${COMPOSE_PROJECT_NAME:-qiyuan}"
+PREFIX="${COMPOSE_PROJECT_NAME:-browser_agent}"
 ADMIN_DIR="$ROOT_DIR/frontend-admin"
 RUN_DIR="$ROOT_DIR/deploy-local/run"
 PORT_FILE="$RUN_DIR/${PREFIX}-frontend-admin.port"
 SESSION_NAME="${PREFIX}-admin-local"
-DEFAULT_PORT="${ADMIN_PORT:-25174}"
+DEFAULT_PORT="${ADMIN_PORT:-26174}"
 
 usage() {
   echo "Usage: bash deploy-local/tools/run-admin-host-local.sh [start|restart|stop|status]"
@@ -51,10 +51,10 @@ current_port() {
 
 run_dev() {
 
-  export VITE_API_BASE_URL="${ADMIN_API_BASE_URL:-http://127.0.0.1:28001}"
+  export VITE_API_BASE_URL="${ADMIN_API_BASE_URL:-http://127.0.0.1:29001}"
   export VITE_API_PREFIX="/api"
   export VITE_ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-}"
-  local port="${QIYUAN_ADMIN_PORT:-$DEFAULT_PORT}"
+  local port="${BROWSER_AGENT_ADMIN_PORT:-$DEFAULT_PORT}"
 
   cd "$ADMIN_DIR"
 
@@ -79,7 +79,7 @@ start_session() {
   local port
   port="$(find_port "$DEFAULT_PORT")"
   echo "$port" >"$PORT_FILE"
-  tmux new-session -d -s "$SESSION_NAME" "QIYUAN_ENV='${QIYUAN_ENV:-}' QIYUAN_TMUX_CHILD=1 QIYUAN_ADMIN_PORT='$port' bash '$SCRIPT_PATH'"
+  tmux new-session -d -s "$SESSION_NAME" "BROWSER_AGENT_ENV_FILE='${BROWSER_AGENT_ENV_FILE:-}' BROWSER_AGENT_TMUX_CHILD=1 BROWSER_AGENT_ADMIN_PORT='$port' bash '$SCRIPT_PATH'"
   echo "Admin frontend started in tmux session: $SESSION_NAME"
   echo "URL: http://localhost:$port"
   echo "Attach logs: tmux attach -t $SESSION_NAME"
@@ -107,7 +107,7 @@ status_session() {
   fi
 }
 
-if [[ "${QIYUAN_TMUX_CHILD:-}" == "1" ]]; then
+if [[ "${BROWSER_AGENT_TMUX_CHILD:-}" == "1" ]]; then
   run_dev
   exit 0
 fi

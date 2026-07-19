@@ -20,7 +20,7 @@ type Config struct {
 func Load() Config {
 	addr := os.Getenv("API_ADDR")
 	if addr == "" {
-		addr = ":28001"
+		addr = ":29001"
 	}
 	return Config{
 		Addr:           addr,

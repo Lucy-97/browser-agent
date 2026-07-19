@@ -1,17 +1,14 @@
-# QIYUAN 0617 通用本地 Automation Worker 实施计划
+# Browser Agent 通用本地 Automation Worker 实施计划
 
-> **⚠️ 架构解耦声明 (2026-06-27)**
-> 
-> 根据最新的 [0627-browser-agent-automation-brd.md](../brd/0627-browser-agent-automation-brd.md) 业务解耦策略：
-> - **AI 4 Science 相关业务**（版权检索 `generic.browser.agent`、页面解析、知识图谱等）已拆分至独立的 `feature/qiyuan` 分支。
-> - 当前的 **`feature/browser-agent` 分支** 仅专注于通用底层基础能力（Playwright、调度机制）以及泛自动化运营场景（如版权监测、社交媒体维护）。
-> 
-> *注：本文档部分内容可能包含早期混杂的版权检测或知识图谱示例，请结合上述分支隔离原则进行阅读，具体实现以各自分支的代码为准。*
+> **状态说明（2026-07-19）**
+>
+> 仓库现为单一 Browser Agent 项目，`main` 是唯一长期主线。本文是早期实施记录，其中旧产品和文献相关阶段仅作历史参考；当前优先级以 [BRD](../brd/0627-browser-agent-automation-brd.md) 和项目交接文档为准。
 
 
 
 ## Changelog
 
+- 2026-07-19：同步单一 Browser Agent 项目现状，移除已废弃的双分支解耦说明。
 - 2026-06-17：新增通用 Automation Worker 实施计划。将旧版 搜索平台/PDF P1 调整为“通用 automation runtime 优先、QIYUAN 文献 adapter 首发、YouTube/TikTok 后续 PoC”的实施路线。
 
 > 上游文档：
@@ -446,4 +443,3 @@ backend-api/
 5. 补单元测试。
 
 完成 A1 后再写 Playwright 搜索平台，会比直接在现有 `job_loop.py` 里堆逻辑更稳，也能为 YouTube/TikTok 留出正确接口。
-

@@ -1,17 +1,21 @@
-# Browser Agent 底座
+# Browser Agent 平台
 
 本项目是用于浏览器自动化执行与代理控制的基础底座平台。
+
+## Changelog
+
+- 2026-07-19：仓库收敛为单一 Browser Agent 项目，统一以 `main` 为开发主线，移除旧业务分支和多环境切换说明。
 
 ## 一、 项目入口与 Agent 协作
 
 - `README.md` 是项目事实入口：维护架构、目录归属、数据库 ownership、文档治理规则和文档 Roadmap。
 - `AGENTS.md` 是通用 agent 行为入口：维护 Codex、Claude、Gemini 等编码 agent 都应遵守的协作、编码、安全和验证习惯。
 
-### 业务分支解耦策略
-本项目为底层基础 Browser Agent 框架，具体业务需求通过 Git 分支层面进行严格的业务隔离，以保持底座纯粹性和组件技术栈一致性：
-- **`feature/browser-agent` 分支**：作为通用能力拓展底座，并承载泛互联网自动化运营（如社媒维护、短剧版权侵权检测）等泛内容商业场景。
-- **`feature/qiyuan` 分支**：专注 AI 4 Science 方向，聚焦学术文献下载和科研知识库抽取业务。
-两个分支共用底层架构（如 Playwright 模拟、分布式 Worker 调度等机制）。底层通用能力的升级可通过合并拣选（Cherry-pick）跨分支共享。
+### 单一主线与模块边界
+
+本仓库只维护 Browser Agent 项目，`main` 是唯一长期开发主线。通用能力、版权检索取证、社媒运营和微信资料同步通过 Worker extension、adapter、policy 与 API 边界隔离，不再通过长期业务分支拆分产品。
+
+功能开发应优先保持底座与业务 adapter 解耦；实验性工作可使用短期功能分支，验证后合回 `main` 并删除，不再维护平行产品分支。
 
 ## 二、 本地开发启动
 
@@ -27,26 +31,24 @@ bash deploy-local/tools/run-admin-host-local.sh start
 bash deploy-local/tools/run-web-host-local.sh start
 bash deploy-local/tools/run-worker-host-local.sh init
 bash deploy-local/tools/run-worker-host-local.sh pair
+bash deploy-local/tools/run-worker-host-local.sh start
 bash deploy-local/integration-test/10-automation-mock.sh
 bash deploy-local/integration-test/20-automation-mysql-smoke.sh
 ```
 
 `run-infra-local.sh` 默认启动 MySQL 和 Redis。Elasticsearch 仍未接入当前 `deploy-local` infra compose。
 
-前端和本机 API 默认在宿主机通过 tmux 启动。前端脚本支持 `start`、`restart`、`stop`、`status`；无参数等价于 `start`。首次使用前需确保宿主机已安装 tmux，例如 `brew install tmux`。如果 Web 的 `23001` 或 Admin 的 `25174` 被占用，脚本会自动使用下一个空闲端口。
+Linux/macOS 上，前端和本机 API 默认在宿主机通过 tmux 启动。前端脚本支持 `start`、`restart`、`stop`、`status`；无参数等价于 `start`。首次使用前需确保宿主机已安装 tmux，例如 `brew install tmux`。Windows 使用 `deploy-local/tools/run-platform-windows.ps1` 和 `run-worker-windows.ps1`，详见本地开发指南。
 
-### 本地端口(TODO)：
+### Browser Agent 本地默认端口
 
 | 服务 | 宿主机地址 |
 | --- | --- |
-| Web | `http://localhost:23001` |
-| Admin | `http://localhost:25174` |
-| Gateway | `http://localhost:28080` |
-| Go API | `http://localhost:28001` |
-| AI Engine | `http://localhost:28002` |
-| MySQL | `127.0.0.1:23307` |
-| Redis | `127.0.0.1:26380` |
-| Elasticsearch | `http://localhost:29200` |
+| Web | `http://localhost:24001` |
+| Admin | `http://localhost:26174` |
+| Go API | `http://localhost:29001` |
+| MySQL | `127.0.0.1:24307` |
+| Redis | `127.0.0.1:27380` |
 
 ## 三、 核心微服务架构
 
@@ -63,7 +65,7 @@ bash deploy-local/integration-test/20-automation-mysql-smoke.sh
 
 *   `backend-gateway`：Go API 网关，负责 JWT、限流、CORS、SSE 透传。
 *   `backend-api`：Go 业务主服务，采用 Handler → Engine → Repository 分层，是用户、支付、业务数据的唯一写入节点。
-*   `worker/local-cli`：本地 Browser Worker CLI，P1 以 macOS Python 3.12 命令行形态运行，负责设备绑定、领取任务、控制本机 Chromium、上传爬取 artifact；不得保存或上传第三方文献源账号密码。
+*   `worker/local-cli`：本地 Browser Worker CLI，使用 Python 3.12，负责设备绑定、领取任务、控制本机 Chromium、上传任务 artifact；不得保存或上传第三方平台账号密码、Cookie 或 Session 明文。
 *   `frontend-web`：Next.js 15 App Router，Cloudflare Pages 部署目标。
 *   `frontend-admin`：Next.js App Router 管理后台。
 
@@ -104,27 +106,27 @@ bash deploy-local/tools/reload-go-local.sh
 
 *   该脚本会重新编译 go-api 和 go-gateway，并重启本地后端 Docker 容器，确保容器内进程加载新二进制。
 *   `reload-go-local.sh` 会写入用户级 Go build cache；如编码 Agent 运行在沙箱内且无法写入仓库外缓存目录，应对该命令请求最小范围提权后执行。
-*   本地前端服务默认由用户在宿主机通过 tmux 运行；如需指定环境隔离，请在所有启动脚本前带上 `QIYUAN_ENV` 变量（例如 `QIYUAN_ENV=browser-agent` 或 `QIYUAN_ENV=qiyuan`），不同环境将映射到独立的底层数据库和偏移端口。Web 使用：
+*   本地前端服务默认由用户在宿主机通过 tmux 运行；启动脚本自动优先加载 `deploy-local/.env.browser-agent`，也可通过 `BROWSER_AGENT_ENV_FILE` 指定其他配置文件。Web 使用：
 
 ```bash
-QIYUAN_ENV=qiyuan bash deploy-local/tools/run-web-host-local.sh start
+bash deploy-local/tools/run-web-host-local.sh start
 ```
 
 *   Admin 使用：
 
 ```bash
-QIYUAN_ENV=qiyuan bash deploy-local/tools/run-admin-host-local.sh start
+bash deploy-local/tools/run-admin-host-local.sh start
 ```
 
 *   前端脚本支持 `start`、`restart`、`stop`、`status`，分别管理 `web` / `admin` tmux session。
-*   Agent 不负责直接持有宿主机 `next dev` / `vite dev` 前台进程；如用户已通过脚本启动宿主机前端，Agent 可复用对应端口做页面验证。**注意：Next.js 禁止在同目录运行多个 dev server，若要在本地同时启动 qiyuan 和 browser-agent 两个环境的 Web，请克隆两份源码分目录执行。**
+*   Agent 不负责直接持有宿主机 `next dev` / `vite dev` 前台进程；如用户已通过脚本启动宿主机前端，Agent 可复用对应端口做页面验证。Next.js 禁止在同一工作区同时运行 `next dev` 与 `next build`，避免共同写入 `.next` 导致缓存产物损坏。
 *   本地 Docker Compose 只承载后端和基础设施，不定义 `web` / `admin` 前端服务。
 
 ### 路径与命令注意事项
 
 *   Shell 中访问含 glob 特殊字符的仓库路径时必须加引号，例如 `frontend-web/app/[lang]/...`、`docs/prd&ui/...`。
 *   本地后端 Compose 文件为 `deploy-local/docker-compose-backend.yaml`；共享基础设施 Compose 文件为 `deploy-local/docker-compose-infra.yaml`。
-*   本机不要假设容器内的 `api:8001` 一定暴露给宿主机。宿主机调用公开 API 走 Gateway，例如 `http://localhost:28080`；调用 `/internal/...` 内部接口应在容器网络内执行，例如：
+*   本机不要假设容器内的 `api:8001` 一定暴露给宿主机。当前 Browser Agent 本地开发直接访问 Go API `http://localhost:29001`；调用 `/internal/...` 内部接口应在容器网络内执行，例如：
 
 ```bash
 docker compose -f deploy-local/docker-compose-backend.yaml exec -T ai-engine ...
@@ -160,19 +162,19 @@ docker compose -f deploy-local/docker-compose-backend.yaml up -d --force-recreat
 
 #### `docs/brd/`
 
-- [0627-browser-agent-automation-brd.md](docs/brd/0627-browser-agent-automation-brd.md)：Browser Agent 商业场景扩展与架构解耦 BRD，规划海外社交媒体自动化运营、短剧版权侵权检索以及不同业务分支间的隔离共享策略。
+- [0627-browser-agent-automation-brd.md](docs/brd/0627-browser-agent-automation-brd.md)：Browser Agent 商业场景扩展与架构解耦 BRD，规划版权侵权检索、海外社交媒体自动化运营及单仓库内的模块隔离策略。
 
 #### `docs/prd&ui/`
 
 #### `docs/tech/`
 
-- [0617-local-automation-worker-architecture.md](docs/tech/0617-local-automation-worker-architecture.md)：基于 Browser Use、Crawl4AI、Skyvern 调研，将本地 Worker 升级为可支持文献爬取、浏览器 Agent、TikTok/YouTube 自动上传和通用网页自动化任务的技术架构。
+- [0617-local-automation-worker-architecture.md](docs/tech/0617-local-automation-worker-architecture.md)：基于 Browser Use、Crawl4AI、Skyvern 调研形成的通用本地 Browser Worker 技术架构与历史演进记录。
 - [0617-local-automation-worker-api-schema.md](docs/tech/0617-local-automation-worker-api-schema.md)：通用 Local Automation Worker 的 `automation_*` 数据模型、Worker API、任务 payload、人工动作、artifact 和错误码设计。
-- [0617-local-automation-worker-implementation-plan.md](docs/tech/0617-local-automation-worker-implementation-plan.md)：通用 Automation Worker 的实施路线，覆盖 runtime 分层、go-api、Google Scholar adapter、artifact、人机协同、YouTube/TikTok PoC 和 Browser Agent 增强。
+- [0617-local-automation-worker-implementation-plan.md](docs/tech/0617-local-automation-worker-implementation-plan.md)：通用 Automation Worker 的历史实施路线，覆盖 runtime 分层、go-api、artifact、人机协同、社媒 PoC 和 Browser Agent 增强。
 - [0617-local-automation-platform-iteration-plan.md](docs/tech/0617-local-automation-platform-iteration-plan.md)：通用 Automation 平台整体迭代计划，统一平台 go-api、数据库、Admin、Web、Worker、部署验证和 YouTube/TikTok PoC 的阶段路线。
 - [0619-llm-browser-agent-integration-plan.md](docs/tech/0619-llm-browser-agent-integration-plan.md)：LLM Browser Agent 接入计划，明确 deterministic adapter 与 LLM Agent 边界、工具集、视觉/HTML 理解、阶段路线和未完成清单。
 - [0702-weixin-group-file-sync-agent-plan.md](docs/tech/0702-weixin-group-file-sync-agent-plan.md)：微信群资料同步 Agent 技术方案，规划基于 `weixin-agent-sdk` 的微信文件接收、本地归档、manifest 记录和后续资料库接入路径。
-- [0709-browser-agent-branch-handoff.md](docs/tech/0709-browser-agent-branch-handoff.md)：`feature/browser-agent` 分支工作交接文档，覆盖当前实现状态、本地启动、核心代码地图、任务链路、adapter 边界、风险事项和后续待办。
+- [0709-browser-agent-branch-handoff.md](docs/tech/0709-browser-agent-branch-handoff.md)：Browser Agent 项目交接文档，覆盖当前实现状态、本地启动、核心代码地图、任务链路、adapter 边界、风险事项和后续待办。
 
 #### `docs/tech/mvp/`
 

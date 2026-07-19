@@ -1,17 +1,14 @@
-# QIYUAN LLM Browser Agent 接入计划
+# LLM Browser Agent 接入计划
 
-> **⚠️ 架构解耦声明 (2026-06-27)**
-> 
-> 根据最新的 [0627-browser-agent-automation-brd.md](../brd/0627-browser-agent-automation-brd.md) 业务解耦策略：
-> - **AI 4 Science 相关业务**（版权检索 `generic.browser.agent`、页面解析、知识图谱等）已拆分至独立的 `feature/qiyuan` 分支。
-> - 当前的 **`feature/browser-agent` 分支** 仅专注于通用底层基础能力（Playwright、调度机制）以及泛自动化运营场景（如版权监测、社交媒体维护）。
-> 
-> *注：本文档部分内容可能包含早期混杂的版权检测或知识图谱示例，请结合上述分支隔离原则进行阅读，具体实现以各自分支的代码为准。*
+> **状态说明（2026-07-19）**
+>
+> 仓库现为单一 Browser Agent 项目，`main` 是唯一长期主线。本文保留 LLM Browser Agent 的设计与落地记录；旧产品线示例仅作历史兼容参考，当前能力以代码、[BRD](../brd/0627-browser-agent-automation-brd.md) 和项目交接文档为准。
 
 
 
 ## Changelog
 
+- 2026-07-19：同步单一 Browser Agent 项目现状，移除已废弃的双分支解耦说明。
 - 2026-06-19：推进平台联动阶段：go-api 增加 checkpoints、trace、policy templates、run cancel、worker run status 和 Web generic browser job 接口；Admin 增加 run detail timeline/artifact/manual action/cancel；Web 增加通用 Browser Agent 任务入口；Worker action executor 支持 cancel 检查。
 - 2026-06-19：完成 L1-L3 Worker 主链路：`llm_plan` 模式、可配置 LLM provider、受控 action executor、逐步 checkpoint、trace 脱敏、元素编号 overlay、`click_element(index)`、PDF download 工具和本地端到端测试；补充产品线 policy template 契约和 social draft/manual-only adapter 骨架。
 - 2026-06-19：落地 Worker 产品线能力 SDK 化注册、`enabled_products` 配置、`allowed_actions`/`action_timeout_seconds` 执行约束、LLM Planner JSON action schema 校验，以及 worker mock 端到端测试。

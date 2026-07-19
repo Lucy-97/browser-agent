@@ -1,5 +1,5 @@
 /* API client for frontend-web.
- * /web/*  → Go API (28001) via next.config.ts rewrites
+ * /web/*  → Go API (29001) via next.config.ts rewrites
  */
 
 export async function api<T>(
@@ -12,7 +12,7 @@ export async function api<T>(
   }
   const token =
     typeof window !== "undefined"
-      ? localStorage.getItem("qiyuan.webToken") || ""
+      ? localStorage.getItem("browser-agent.webToken") || ""
       : "";
   if (token) {
     headers["X-Web-Token"] = token;

@@ -11,7 +11,7 @@ services:
       MYSQL_USER: qiyuan
       MYSQL_PASSWORD: qiyuan
     ports:
-      - "${MYSQL_PORT:-23307}:3306"
+      - "${MYSQL_PORT:-24307}:3306"
     volumes:
       - qiyuan_mysql_data:/var/lib/mysql
     healthcheck:
@@ -25,7 +25,7 @@ services:
     image: redis:7.2
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-26380}:6379"
+      - "${REDIS_PORT:-27380}:6379"
     volumes:
       - qiyuan_redis_data:/data
     healthcheck:

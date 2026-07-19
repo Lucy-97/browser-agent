@@ -116,7 +116,7 @@ services:
     depends_on:
       - api
     environment:
-      QIYUAN_WORKER_ALLOW_INSECURE_FILE_SECRETS: "1"
+      BROWSER_AGENT_WORKER_ALLOW_INSECURE_FILE_SECRETS: "1"
       PYTHONUNBUFFERED: "1"
       LLM_PROVIDER: "${LLM_PROVIDER:-gemini}"
       LLM_MODEL: "${LLM_MODEL:-gemini-2.5-pro}"

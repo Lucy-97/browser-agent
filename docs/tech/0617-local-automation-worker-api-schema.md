@@ -1,17 +1,14 @@
-# QIYUAN 0617 通用本地 Automation Worker API 与数据模型设计
+# Browser Agent 通用本地 Automation Worker API 与数据模型设计
 
-> **⚠️ 架构解耦声明 (2026-06-27)**
-> 
-> 根据最新的 [0627-browser-agent-automation-brd.md](../brd/0627-browser-agent-automation-brd.md) 业务解耦策略：
-> - **AI 4 Science 相关业务**（版权检索 `generic.browser.agent`、页面解析、知识图谱等）已拆分至独立的 `feature/qiyuan` 分支。
-> - 当前的 **`feature/browser-agent` 分支** 仅专注于通用底层基础能力（Playwright、调度机制）以及泛自动化运营场景（如版权监测、社交媒体维护）。
-> 
-> *注：本文档部分内容可能包含早期混杂的版权检测或知识图谱示例，请结合上述分支隔离原则进行阅读，具体实现以各自分支的代码为准。*
+> **状态说明（2026-07-19）**
+>
+> 仓库现为单一 Browser Agent 项目，`main` 是唯一长期主线。本文保留早期 API 与数据模型演进记录，其中旧产品和文献业务模型仅作历史兼容参考；新增接口以当前代码和 [BRD](../brd/0627-browser-agent-automation-brd.md) 为准。
 
 
 
 ## Changelog
 
+- 2026-07-19：同步单一 Browser Agent 项目现状，移除已废弃的双分支解耦说明。
 - 2026-06-17：新增通用 Automation Worker API 与数据模型设计。将旧版文献场景 `crawl_*` 模型升级为 `automation_*` 通用模型，覆盖设备绑定、任务下发、能力声明、策略约束、checkpoint、artifact、人机协同、审计和 QIYUAN/YouTube/TikTok adapter 兼容关系。
 
 > 上游架构：`docs/tech/0617-local-automation-worker-architecture.md`
@@ -859,4 +856,3 @@ P3：
 2. Browser Agent 任务。
 3. 工作流编排。
 4. 多 adapter 包和版本管理。
-

@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     init_parser = sub.add_parser("init", help="initialize local worker config")
-    init_parser.add_argument("--server", default="http://localhost:28080")
+    init_parser.add_argument("--server", default="http://localhost:29001")
     init_parser.set_defaults(func=cmd_init)
 
     pair_parser = sub.add_parser("pair", help="pair this machine with the platform")
@@ -79,7 +79,7 @@ def cmd_pair(args: argparse.Namespace) -> None:
     secrets = build_secret_store(config.secrets_dir)
     client = APIClient(config.server)
     pairing = create_pairing(client, display_name=args.display_name)
-    print("Pair this device in the QIYUAN platform:")
+    print("Pair this device in the Browser Agent platform:")
     print(f"  code: {pairing.pairing_code}")
     print(f"  url:  {pairing.verification_uri}")
     print(f"  expires_at: {pairing.expires_at}")

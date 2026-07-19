@@ -28,7 +28,7 @@ function Import-DotEnv([string]$Path) {
     foreach ($key in @($values.Keys)) {
         [Environment]::SetEnvironmentVariable($key, [string]$values[$key], "Process")
     }
-    $env:QIYUAN_ENV = $Environment
+    $env:BROWSER_AGENT_ENV = $Environment
 }
 
 function Invoke-Worker([string[]]$Arguments) {

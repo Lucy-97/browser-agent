@@ -58,7 +58,7 @@ func (repo *MemoryRepository) CreatePairing(req workermodel.PairingRequest) work
 func pairingVerificationURI() string {
 	baseURL := strings.TrimRight(os.Getenv("PUBLIC_WEB_BASE_URL"), "/")
 	if baseURL == "" {
-		baseURL = "http://localhost:23001"
+		baseURL = "http://localhost:24001"
 	}
 	return baseURL + "/worker/pair"
 }

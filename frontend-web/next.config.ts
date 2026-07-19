@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const GO_API_BASE = process.env.GO_API_BASE_URL || "http://127.0.0.1:28001";
+const GO_API_BASE = process.env.GO_API_BASE_URL || "http://127.0.0.1:29001";
 
 const nextConfig: NextConfig = {
   output: "standalone",

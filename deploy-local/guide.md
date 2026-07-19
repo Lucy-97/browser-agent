@@ -1,70 +1,50 @@
-# QIYUAN 本地开发指南
+# Browser Agent 本地开发指南
 
 ## Changelog
 
+- 2026-07-19：仓库收敛为单一 Browser Agent 项目；启动脚本固定优先加载 `.env.browser-agent`，统一默认端口和服务命名。
 - 2026-07-19：新增 Windows Browser Agent 一键端到端验收，通过 Web 代理创建确定性任务、真实 Chromium 执行，并从 Admin 代理校验 run、trace 和截图；移除已失效的旧 demo 命令。
 - 2026-07-17：新增 Windows 原生平台与 Worker 启停脚本，覆盖 Go API、Web、Admin、Worker 的隐藏窗口常驻运行、状态检查、日志和 PID 管理。
-- 2026-06-27：引入本地多环境隔离机制（qiyuan 与 browser-agent）。支持通过 `QIYUAN_ENV` 变量无缝切换不同的底层容器（MySQL/Redis/Neo4j）和宿主机端口，实现单机双分支安全并存。
-- 2026-06-19：补充完整本地验收流程，覆盖环境检查、API/Worker 常驻启动、日志观察、mock/MySQL/Browser Agent/Google Scholar PDF demo、artifact 校验、manual action 和 Worker token 失效处理。
+- 2026-06-19：补充完整本地验收流程，覆盖环境检查、API/Worker 常驻启动、日志观察、mock/MySQL/Browser Agent、artifact 校验、manual action 和 Worker token 失效处理。
 - 2026-06-19：本机默认端口整体上移 20000，避让同机多项目开发端口冲突。
 - 2026-06-18：调整 demo 为常驻 Worker 形态：`run-worker-host-local.sh` 新增 `deploy-local/logs/worker-local.log` 常驻日志。
 - 2026-06-18：新增 `frontend-admin` Vite/React 调试控制台和 `run-admin-host-local.sh`，并将 `run-api-host-local.sh` 调整为 tmux 常驻模式，避免宿主进程被 shell 回收。
 - 2026-06-18：补齐本地 MySQL/Redis infra compose、schema apply 脚本和 MySQL 持久化 smoke test。`backend-api` 现在可在 `MYSQL_DSN` + `REDIS_ADDR` 下跑通 Automation 持久化闭环。
 - 2026-06-18：新增当前可用的 `backend-api` 宿主机启动方式和 Automation mock smoke test。Docker Compose、Gateway、Admin、Web 和 MySQL 持久化链路仍按后续迭代补齐。
 
-## 一、环境隔离与启动方式
+## 一、配置与启动方式
 
-自 2026-06-27 起，QIYUAN 项目在本地支持物理隔离的多环境并存开发。通过设置 `QIYUAN_ENV` 环境变量，可以在不同的分支和场景中使用不同的配置（默认读取 `deploy-local/.env.${QIYUAN_ENV}`，未指定时默认回退读取 `deploy-local/.env` 或 `.env.qiyuan`）。
+本仓库只维护 Browser Agent 本地环境。启动脚本依次尝试读取：
 
-目前支持的环境包括：
-- `qiyuan`：用于文献检索与知识库业务（如 `feature/qiyuan` 分支）。端口基准：23000。
-- `browser-agent`：用于自动化运营业务（如 `feature/browser-agent` 分支）。端口基准：24000。
+1. `BROWSER_AGENT_ENV_FILE` 指定的文件；
+2. `deploy-local/.env.browser-agent`；
+3. `deploy-local/.env`。
 
-**启动指定环境的基础设施：**
+首次使用可从模板创建本地配置；配置文件可能包含本机密钥，不要提交：
 
 ```bash
-QIYUAN_ENV=qiyuan bash deploy-local/tools/run-infra-local.sh start
-QIYUAN_ENV=qiyuan bash deploy-local/tools/db-apply.sh all
+cp deploy-local/.env.example deploy-local/.env.browser-agent
+```
+
+**启动基础设施并应用数据库：**
+
+```bash
+bash deploy-local/tools/run-infra-local.sh start
+bash deploy-local/tools/db-apply.sh all
 ```
 
 **启动 API 及其他组件：**
 
 ```bash
-QIYUAN_ENV=qiyuan bash deploy-local/tools/run-api-host-local.sh start
-QIYUAN_ENV=qiyuan bash deploy-local/tools/run-web-host-local.sh start
+bash deploy-local/tools/run-api-host-local.sh start
+bash deploy-local/tools/run-admin-host-local.sh start
+bash deploy-local/tools/run-web-host-local.sh start
+bash deploy-local/tools/run-worker-host-local.sh start
 ```
 
-可通过对应环境的 `.env.${QIYUAN_ENV}` 覆盖变量：
+模板默认使用 API `29001`、Web `24001`、Admin `26174`、MySQL `24307` 和 Redis `27380`。未配置 `MYSQL_DSN` 时，`backend-api` 使用内存 repository，进程重启后状态会丢失；未配置 `REDIS_ADDR` 时使用 no-op locker，便于无 Redis 的本地 mock 验收。
 
-```bash
-cp deploy-local/.env.example deploy-local/.env
-```
-
-```text
-API_ADDR=:28001
-ARTIFACT_DIR=deploy-local/artifacts
-MYSQL_DSN=qiyuan:qiyuan@tcp(127.0.0.1:23307)/qiyuan?parseTime=true&charset=utf8mb4&loc=Local
-MYSQL_MAX_OPEN_CONNS=10
-MYSQL_MAX_IDLE_CONNS=5
-REDIS_ADDR=127.0.0.1:26380
-REDIS_PASSWORD=
-REDIS_DB=0
-ADMIN_API_BASE_URL=http://127.0.0.1:28001
-```
-
-未配置 `MYSQL_DSN` 时，`backend-api` 使用内存 repository，进程重启后状态会丢失。如本机 MySQL 已准备好 schema，可设置：
-
-```text
-MYSQL_DSN=qiyuan:qiyuan@tcp(127.0.0.1:23307)/qiyuan?parseTime=true&charset=utf8mb4&loc=Local
-```
-
-如本机已启动 Redis，可设置：
-
-```text
-REDIS_ADDR=127.0.0.1:26380
-```
-
-当前 Redis 用于 `automation:jobs:claim` 短租约锁，保护多 API 实例并发领取任务。未配置 `REDIS_ADDR` 时使用 no-op locker，便于本地 mock smoke test 在没有 Redis 的环境继续运行。
+当前 Redis 用于 `automation:jobs:claim` 短租约锁，保护多 API 实例并发领取任务。
 
 ### Windows 原生启动（browser-agent）
 
@@ -96,7 +76,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-w
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-worker-windows.ps1 start -Environment browser-agent
 ```
 
-Windows 未配置系统凭据存储时，本地开发环境可在忽略提交的 `.env.browser-agent` 中设置 `QIYUAN_WORKER_ALLOW_INSECURE_FILE_SECRETS=1`。这会把 Worker token 保存在用户应用数据目录，只适合受控的本地开发机，生产环境禁止使用。
+Windows 未配置系统凭据存储时，本地开发环境可在忽略提交的 `.env.browser-agent` 中设置 `BROWSER_AGENT_WORKER_ALLOW_INSECURE_FILE_SECRETS=1`。这会把 Worker token 保存在用户应用数据目录，只适合受控的本地开发机，生产环境禁止使用。
 
 `browser-agent` 默认访问地址：Web `http://localhost:24001`、Admin `http://localhost:26174`、API `http://localhost:29001`、MySQL `127.0.0.1:24307`、Redis `127.0.0.1:27380`。停止服务时把 `start` 改为 `stop`；重启时改为 `restart`。日志位于 `deploy-local/logs/`，PID 文件位于 `deploy-local/run/`。
 
@@ -139,10 +119,10 @@ bash deploy-local/tools/run-admin-host-local.sh stop
 Admin 默认访问：
 
 ```text
-http://localhost:25174
+http://localhost:26174
 ```
 
-如果 `25174` 已被占用，脚本会选择下一个空闲端口，并在 `deploy-local/run/frontend-admin.port` 记录真实端口。Admin dev server 使用 Vite proxy，将浏览器里的 `/api/*` 转发到 `ADMIN_API_BASE_URL`，默认是 `http://127.0.0.1:28001`。
+如果 `26174` 已被占用，脚本会选择下一个空闲端口，并在 `deploy-local/run/browser_agent-frontend-admin.port` 记录真实端口。Admin dev server 将浏览器里的 `/api/*` 转发到 `ADMIN_API_BASE_URL`，默认是 `http://127.0.0.1:29001`。
 
 Web：
 
@@ -155,10 +135,10 @@ bash deploy-local/tools/run-web-host-local.sh stop
 Web 默认访问：
 
 ```text
-http://localhost:23001
+http://localhost:24001
 ```
 
-如果 `23001` 已被占用，脚本会选择下一个空闲端口，并在 `deploy-local/run/frontend-web.port` 记录真实端口。Web 当前是无依赖静态 SPA，浏览器直接访问 `http://127.0.0.1:28001` 的 `/web/*` API；`backend-api` 已对 localhost origin 开启本地 CORS。
+如果 `24001` 已被占用，脚本会选择下一个空闲端口，并在 `deploy-local/run/browser_agent-frontend-web.port` 记录真实端口。Web 通过 Next.js rewrite 访问 `http://127.0.0.1:29001` 的 `/web/*` API；`backend-api` 已对 localhost origin 开启本地 CORS。
 
 本地鉴权边界：
 
@@ -168,7 +148,7 @@ ADMIN_API_TOKEN=
 WEB_API_TOKEN=
 ```
 
-`ADMIN_API_TOKEN` 或 `WEB_API_TOKEN` 为空时，对应接口保持本地开发免 token；配置后，`/admin/*` 需要 `X-Admin-Token` 或 `Authorization: Bearer ...`，`/web/*` 需要 `X-Web-Token` 或 `Authorization: Bearer ...`。Admin dev server 会从 `deploy-local/.env` 注入 `VITE_ADMIN_API_TOKEN`；Web 静态页可通过浏览器 localStorage 设置 `qiyuan.webToken`。
+`ADMIN_API_TOKEN` 或 `WEB_API_TOKEN` 为空时，对应接口保持本地开发免 token；配置后，`/admin/*` 需要 `X-Admin-Token` 或 `Authorization: Bearer ...`，`/web/*` 需要 `X-Web-Token` 或 `Authorization: Bearer ...`。Admin dev server 会从本地环境文件注入 `VITE_ADMIN_API_TOKEN`；浏览器端可通过 localStorage 设置 `browser-agent.adminToken` 或 `browser-agent.webToken`。
 
 Worker：
 
@@ -182,7 +162,7 @@ bash deploy-local/tools/run-worker-host-local.sh status
 bash deploy-local/tools/run-worker-host-local.sh stop
 ```
 
-Worker 是用户本机执行节点，不放进 Docker。它会使用本机 Python、Playwright 和 Chromium，并把配置、设备信息和浏览器 profile 放在用户系统应用数据目录。默认平台地址来自 `WORKER_SERVER_URL`，未配置时使用 `http://127.0.0.1:28001`。常驻 Worker 的 stdout/stderr 会写入：
+Worker 是用户本机执行节点，不放进 Docker。它会使用本机 Python、Playwright 和 Chromium，并把配置、设备信息和浏览器 profile 放在用户系统应用数据目录。默认平台地址来自 `WORKER_SERVER_URL`，未配置时使用 `http://127.0.0.1:29001`。常驻 Worker 的 stdout/stderr 会写入：
 
 ```text
 deploy-local/logs/worker-local.log
@@ -193,8 +173,8 @@ deploy-local/logs/worker-local.log
 ```text
 deploy-local/logs/backend-api.log
 deploy-local/logs/worker-local.log
-tmux session: qiyuan-backend-api-local
-tmux session: qiyuan-worker-local
+tmux session: browser_agent-backend-api-local
+tmux session: browser_agent-worker-local
 ```
 
 `deploy-local/logs/` 和 `deploy-local/run/` 是本地运行产物，不应提交。
@@ -229,7 +209,7 @@ MySQL/Redis 持久化 smoke test：
 bash deploy-local/integration-test/20-automation-mysql-smoke.sh
 ```
 
-脚本会启动 MySQL/Redis、应用 schema、在 `:38001` 临时启动 MySQL 模式 API，并验证 pairing、heartbeat、job claim、checkpoint、artifact、本地文件 artifact 上传下载、PDF artifact 入解析队列、internal parser claim/parsed 写回、manual action resolve、列表查询、设备撤销和 revoked token 拒绝。
+脚本会启动 MySQL/Redis、应用 schema、在 `:38001` 临时启动 MySQL 模式 API，并验证 pairing、heartbeat、job claim、checkpoint、artifact、本地文件 artifact 上传下载、manual action resolve、列表查询、设备撤销和 revoked token 拒绝。
 
 Browser Agent Windows 端到端验收：
 
@@ -249,15 +229,15 @@ cd deploy-local
 ./tools/run-api-host-local.sh status
 ./tools/run-worker-host-local.sh status
 ./tools/run-worker-host-local.sh doctor
-curl -fsS http://127.0.0.1:28001/healthz
+curl -fsS http://127.0.0.1:29001/healthz
 ```
 
 检查 `deploy-local/.env` 至少包含：
 
 ```text
-API_ADDR=:28001
-MYSQL_DSN=qiyuan:qiyuan@tcp(127.0.0.1:23307)/qiyuan?parseTime=true&charset=utf8mb4&loc=Local
-REDIS_ADDR=127.0.0.1:26380
+API_ADDR=:29001
+MYSQL_DSN=<使用 deploy-local/.env.browser-agent 中的本地 MySQL DSN>
+REDIS_ADDR=127.0.0.1:27380
 ARTIFACT_DIR=deploy-local/artifacts
 ```
 
@@ -308,7 +288,7 @@ worker.job_finished job_id=... status=...
 ./integration-test/20-automation-mysql-smoke.sh
 ```
 
-`10` 验证内存/当前 API 的 job/run/artifact 生命周期。`20` 验证 MySQL/Redis 持久化、artifact 文件上传下载、PDF artifact 入解析队列、internal parser 写回、manual action resolve、设备撤销和 revoked token 拒绝。
+`10` 验证内存/当前 API 的 job/run/artifact 生命周期。`20` 验证 MySQL/Redis 持久化、artifact 文件上传下载、manual action resolve、设备撤销和 revoked token 拒绝。
 
 ### 5. 跑 Browser Agent Windows 端到端验收
 
@@ -330,17 +310,17 @@ artifacts=agent_trace,screenshot
 用脚本输出的 `run_id` 查看 artifact：
 
 ```bash
-curl -s "http://127.0.0.1:28001/admin/automation/runs/<run_id>/artifacts" | python3 -m json.tool
+curl -s "http://127.0.0.1:29001/admin/automation/runs/<run_id>/artifacts" | python3 -m json.tool
 ```
 
 下载 PDF：
 
 ```bash
-curl -L "http://127.0.0.1:28001/admin/automation/artifacts/<artifact_id>/download" -o /tmp/qiyuan-demo.pdf
-file /tmp/qiyuan-demo.pdf
+curl -L "http://127.0.0.1:29001/admin/automation/artifacts/<artifact_id>/download" -o /tmp/browser-agent-demo.pdf
+file /tmp/browser-agent-demo.pdf
 ```
 
-Worker 本地任务记录在：
+Worker 本地任务记录在系统应用数据目录。为保留已配对设备和浏览器 profile，当前 CLI 仍沿用历史兼容目录名：
 
 ```text
 ~/Library/Application Support/QIYUAN Worker/jobs/<job_id>/
@@ -359,13 +339,13 @@ cat "$HOME/Library/Application Support/QIYUAN Worker/jobs/<job_id>/upload-manife
 如果自动化流程输出 `needs_manual_action`，先在本机 Chromium 里完成 Google 验证，再查 pending action：
 
 ```bash
-curl -s "http://127.0.0.1:28001/admin/automation/manual-actions?status=pending&limit=5" | python3 -m json.tool
+curl -s "http://127.0.0.1:29001/admin/automation/manual-actions?status=pending&limit=5" | python3 -m json.tool
 ```
 
 resolve：
 
 ```bash
-curl -X POST "http://127.0.0.1:28001/admin/automation/manual-actions/<manual_action_id>/resolve" \
+curl -X POST "http://127.0.0.1:29001/admin/automation/manual-actions/<manual_action_id>/resolve" \
   -H "Content-Type: application/json" \
   -d '{"status":"resolved","payload":{"resolved_by":"local-demo"}}'
 ```
@@ -376,4 +356,4 @@ curl -X POST "http://127.0.0.1:28001/admin/automation/manual-actions/<manual_act
 2. MySQL schema 已在 `database/init.sql` 和 `database/migrations/` 中定义，`deploy-local/tools/db-apply.sh` 可应用基线和迁移。
 3. Redis 已接入 job claim 短锁；未配置时不会影响本地 mock 流程。
 4. Worker 已支持 automation runtime、mock adapter 和 `generic.browser_agent` PoC。
-5. Admin 已有 Automation 调试控制台首版；Web 已有本地文献检索任务入口；Gateway 和 AI Engine 的本地启动脚本后续补齐。
+5. Admin 已有 Automation 调试控制台首版；Web 已有 Browser Agent、版权检索、社媒运营和微信资料同步入口；Gateway 和 AI Engine 的本地启动脚本后续补齐。

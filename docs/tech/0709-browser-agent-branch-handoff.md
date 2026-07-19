@@ -1,29 +1,24 @@
-# Browser Agent 分支项目工作交接文档
+# Browser Agent 项目工作交接文档
 
 ## Changelog
 
-- 2026-07-19：同步 `feature/browser-agent` 已合入 `main` 的现状，记录 Windows Web → Worker → Admin 端到端验收脚本和已完成的干净环境验证。
-- 2026-07-09：首次整理 `feature/browser-agent` 分支交接说明，覆盖分支定位、当前实现状态、本地启动、核心代码地图、任务链路、已落地 adapter、验证命令、风险边界和后续待办。
+- 2026-07-19：仓库收敛为单一 Browser Agent 项目，`main` 为唯一长期主线；同步单环境启动方式、Windows Web → Worker → Admin 端到端验收和后续优先级。
+- 2026-07-09：首次整理 Browser Agent 交接说明，覆盖项目定位、当前实现状态、本地启动、核心代码地图、任务链路、已落地 adapter、验证命令、风险边界和后续待办。
 
 ---
 
 ## 一、交接范围
 
-本文面向后续接手 Browser Agent 主线的研发、运维或编码 Agent，用于快速理解业务定位、代码入口、运行方式和风险边界。`feature/browser-agent` 的实现已合入 `main`，新工作应以当前任务指定的目标分支为准。
+本文面向后续接手 Browser Agent 的研发、运维或编码 Agent，用于快速理解业务定位、代码入口、运行方式和风险边界。仓库只维护 Browser Agent 项目，`main` 是唯一长期开发主线。
 
-`feature/browser-agent` 当前定位是 **通用 Browser Agent 底座 + 泛互联网自动化运营分支**，主要承载：
+项目当前定位是 **通用 Browser Agent 底座 + 泛互联网自动化运营平台**，主要承载：
 
 1. 通用 Automation 平台：设备绑定、任务调度、run、checkpoint、artifact、manual action、trace。
 2. 本地 Browser Worker：用户本机可信执行节点，控制真实 Chromium / Chrome 执行任务。
 3. 通用浏览器 Agent：`generic.browser_agent`、`browser.act` 等网页操作能力。
 4. 泛运营 adapter：短剧版权检索取证、社媒视频上传、微信群资料同步等。
 
-与 `feature/qiyuan` 的边界：
-
-- `feature/qiyuan` 专注 AI for Science、文献检索、PDF 解析、知识抽取、Neo4j/MCP。
-- `feature/browser-agent` 专注通用自动化执行、社媒/内容运营、版权取证、微信资料同步。
-- 两个分支共享 Playwright、Worker 调度、artifact、manual action 等底层能力，底座修复可通过 cherry-pick 互相同步。
-- 本分支仍有部分历史文档和代码命名保留 `QIYUAN` 字样，接手时应按当前 README 的分支解耦策略理解，不要把 AI 4 Science 业务继续扩进本分支。
+通用底座与业务能力通过 extension、adapter 和 policy 分层，不再通过长期业务分支隔离。历史 Python 包名、命令名和数据库标识仍可能保留旧命名；它们属于兼容标识，不能据此推断仓库仍存在另一个产品或分支。
 
 ---
 
@@ -31,7 +26,7 @@
 
 | 模块 | 当前状态 | 主要说明 |
 |------|----------|----------|
-| 本地部署 | 已有脚本 | 支持 `QIYUAN_ENV=browser-agent` 多环境隔离；API/Web/Admin/Worker 通过 tmux 管理 |
+| 本地部署 | 已有脚本 | 单一 Browser Agent 环境；Windows 使用 PowerShell，Linux/macOS 的 API/Web/Admin/Worker 通过 tmux 管理 |
 | go-api | 已实现 | Automation job/run/artifact/manual action/trace、Worker 配对、Web/Admin 接口 |
 | Worker CLI | 已实现 | Python 3.12，本机运行，支持设备绑定、能力上报、任务领取、Playwright 执行、artifact 上传 |
 | Generic Browser Agent | 已实现首版 | 支持受 policy 约束的 observe、click、fill、extract、screenshot、trace、LLM planner |
@@ -48,11 +43,9 @@
 
 ### 3.1 推荐启动顺序
 
-建议显式指定环境，避免与 `feature/qiyuan` 的本地数据、端口和 Worker 凭证混用：
+启动脚本会优先加载 `deploy-local/.env.browser-agent`；如需使用其他本地配置文件，可设置 `BROWSER_AGENT_ENV_FILE`：
 
 ```bash
-export QIYUAN_ENV=browser-agent
-
 bash deploy-local/tools/run-infra-local.sh start
 bash deploy-local/tools/db-apply.sh all
 
@@ -77,14 +70,15 @@ bash deploy-local/tools/run-worker-host-local.sh doctor
 
 ### 3.2 默认端口
 
-README 中仍列出默认端口基线；`deploy-local/guide.md` 说明 `browser-agent` 环境有独立端口偏移，真实端口以启动脚本输出和 `deploy-local/run/*.port` 为准。
+默认配置使用以下端口；真实端口仍以启动脚本输出和 `deploy-local/run/*.port` 为准。
 
 | 服务 | 默认说明 |
 |------|----------|
-| Web | `deploy-local/run/frontend-web.port` 记录真实端口 |
-| Admin | `deploy-local/run/frontend-admin.port` 记录真实端口 |
-| Go API | 默认配置来自 `deploy-local/.env` 或 `.env.browser-agent` |
-| MySQL / Redis | 由 `run-infra-local.sh` 按 `QIYUAN_ENV` 隔离启动 |
+| Web | `http://localhost:24001` |
+| Admin | `http://localhost:26174` |
+| Go API | `http://localhost:29001` |
+| MySQL | `127.0.0.1:24307` |
+| Redis | `127.0.0.1:27380` |
 
 ### 3.3 常用验证
 
@@ -270,16 +264,14 @@ Web /web/automation/weixin-desktop-sync-jobs
 
 | 文档 | 用途 |
 |------|------|
-| `README.md` | 当前分支事实入口、本地启动、目录归属、文档治理 |
-| `docs/brd/0627-browser-agent-automation-brd.md` | Browser Agent 商业场景扩展和分支解耦 BRD |
+| `README.md` | 项目事实入口、本地启动、目录归属、文档治理 |
+| `docs/brd/0627-browser-agent-automation-brd.md` | Browser Agent 商业场景扩展和模块解耦 BRD |
 | `docs/tech/0617-local-automation-worker-architecture.md` | 通用本地 Automation Worker 架构 |
 | `docs/tech/0617-local-automation-worker-api-schema.md` | `automation_*` 数据模型、Worker API、人工动作、artifact、错误码 |
 | `docs/tech/0617-local-automation-worker-implementation-plan.md` | Worker 子计划 |
 | `docs/tech/0617-local-automation-platform-iteration-plan.md` | 平台级总计划与历史落地记录 |
 | `docs/tech/0619-llm-browser-agent-integration-plan.md` | LLM Browser Agent 接入计划和未完成清单 |
 | `docs/tech/0702-weixin-group-file-sync-agent-plan.md` | 微信群资料同步 Agent 技术方案 |
-| `docs/tech/0626-web-operation-manual.md` | Web 操作手册，部分 QIYUAN/文献内容需后续清理 |
-| `docs/tech/0626-admin-operation-manual.md` | Admin 操作手册，部分任务类型描述需后续同步 |
 
 ---
 
@@ -287,7 +279,7 @@ Web /web/automation/weixin-desktop-sync-jobs
 
 ### P0 / 近期
 
-- 清理或标注文档中的旧 QIYUAN/文献/知识图谱表述，避免和 `feature/qiyuan` 职责混淆。
+- 定义版权检索的作品、检索条件、候选线索和取证 artifact 最小模型，跑通首个真实业务闭环。
 - 为社媒自动发布能力补安全确认：哪些平台允许自动发布、哪些场景必须人工确认、如何记录审计。
 
 已于 2026-07-19 完成 Windows 干净环境启动和 Web → Worker → Admin 验收；`deploy-local/integration-test/30-browser-agent-windows.ps1` 会创建确定性 Browser Agent 任务并校验 trace、截图。
@@ -312,9 +304,9 @@ Web /web/automation/weixin-desktop-sync-jobs
 
 ## 八、接手注意事项
 
-1. 先确认分支：Browser Agent 已合入 `main`，以当前任务约定的目标分支为准，不再强制要求 `feature/browser-agent`。
+1. 先确认分支：`main` 是唯一长期开发主线；短期功能分支验收后应合回并删除。
 2. 先读 `README.md`、本文和 `docs/brd/0627-browser-agent-automation-brd.md`，再进入具体模块。
-3. 不要把 AI 4 Science / 文献解析 / Neo4j / MCP 新需求继续扩进本分支。
+3. 新业务通过 extension、adapter 和 policy 接入，不要把平台特例写进通用浏览器运行时。
 4. 不要绕过 go-api 写 MySQL；Worker 只通过 API 上报状态、artifact 和 manual action。
 5. 不要上传或记录第三方平台账号密码、Cookie、Session 明文。
 6. 真实社媒/微信任务涉及用户账号和外部平台，改动后需要说明验证账号、平台状态、是否执行发布。
@@ -325,9 +317,9 @@ Web /web/automation/weixin-desktop-sync-jobs
 
 ## 九、建议接手检查清单
 
-- [ ] 当前分支符合本次任务约定，且不是误在其他产品分支修改。
+- [ ] 当前工作基于 `main` 或准备合回 `main` 的短期功能分支。
 - [ ] 工作区没有用户未提交改动，或已明确哪些改动不能触碰。
-- [ ] `export QIYUAN_ENV=browser-agent` 后启动本地服务。
+- [ ] 使用 `deploy-local/.env.browser-agent` 启动本地服务。
 - [ ] Web 和 Admin 均可访问，真实端口已从 `deploy-local/run/*.port` 确认。
 - [ ] Worker 完成 `init` / `pair` / `doctor`，能力上报包含目标 adapter。
 - [ ] 跑通 `10-automation-mock.sh` 和 `20-automation-mysql-smoke.sh`。

@@ -2,7 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:28001}"
+source "${ROOT_DIR}/deploy-local/tools/load-env.sh"
+API_PORT="${API_ADDR:-:29001}"
+API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:${API_PORT#:}}"
 RUN_SCRIPT="${ROOT_DIR}/deploy-local/tools/run-api-host-local.sh"
 STARTED_BY_TEST=0
 

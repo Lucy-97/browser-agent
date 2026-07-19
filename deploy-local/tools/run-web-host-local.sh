@@ -6,12 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_PATH="$SCRIPT_DIR/$(basename "$0")"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$ROOT_DIR/deploy-local/tools/load-env.sh"
-PREFIX="${COMPOSE_PROJECT_NAME:-qiyuan}"
+PREFIX="${COMPOSE_PROJECT_NAME:-browser_agent}"
 WEB_DIR="$ROOT_DIR/frontend-web"
 RUN_DIR="$ROOT_DIR/deploy-local/run"
 PORT_FILE="$RUN_DIR/${PREFIX}-frontend-web.port"
 SESSION_NAME="${PREFIX}-web-local"
-DEFAULT_PORT="${WEB_PORT:-23001}"
+DEFAULT_PORT="${WEB_PORT:-24001}"
 
 usage() {
   echo "Usage: bash deploy-local/tools/run-web-host-local.sh [start|restart|stop|status]"
@@ -51,7 +51,7 @@ current_port() {
 
 run_web() {
   cd "$WEB_DIR"
-  export PORT="${QIYUAN_WEB_PORT:-$DEFAULT_PORT}"
+  export PORT="${BROWSER_AGENT_WEB_PORT:-$DEFAULT_PORT}"
   exec npm run dev -- -p "$PORT"
 }
 
@@ -68,7 +68,7 @@ start_session() {
   local port
   port="$(find_port "$DEFAULT_PORT")"
   echo "$port" >"$PORT_FILE"
-  tmux new-session -d -s "$SESSION_NAME" "QIYUAN_ENV='${QIYUAN_ENV:-}' QIYUAN_TMUX_CHILD=1 QIYUAN_WEB_PORT='$port' bash '$SCRIPT_PATH'"
+  tmux new-session -d -s "$SESSION_NAME" "BROWSER_AGENT_ENV_FILE='${BROWSER_AGENT_ENV_FILE:-}' BROWSER_AGENT_TMUX_CHILD=1 BROWSER_AGENT_WEB_PORT='$port' bash '$SCRIPT_PATH'"
   echo "Web frontend started in tmux session: $SESSION_NAME"
   echo "URL: http://localhost:$port"
   echo "Attach logs: tmux attach -t $SESSION_NAME"
@@ -96,7 +96,7 @@ status_session() {
   fi
 }
 
-if [[ "${QIYUAN_TMUX_CHILD:-}" == "1" ]]; then
+if [[ "${BROWSER_AGENT_TMUX_CHILD:-}" == "1" ]]; then
   run_web
   exit 0
 fi

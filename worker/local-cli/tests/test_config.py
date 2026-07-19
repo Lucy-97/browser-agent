@@ -13,18 +13,18 @@ class ConfigTest(unittest.TestCase):
             config_path = tmp_path / "config.yaml"
             data_dir = tmp_path / "data"
             config = write_default_config(
-                server="http://localhost:28080",
+                server="http://localhost:29001",
                 config_path=config_path,
                 data_dir=data_dir,
             )
 
             loaded = load_config(config_path)
 
-            self.assertEqual(loaded.server, "http://localhost:28080")
+            self.assertEqual(loaded.server, "http://localhost:29001")
             self.assertEqual(loaded.data_dir, data_dir)
             self.assertEqual(loaded.poll_interval_seconds, config.poll_interval_seconds)
             self.assertEqual(loaded.heartbeat_interval_seconds, config.heartbeat_interval_seconds)
-            self.assertEqual(loaded.enabled_products, ("core", "browser_agent", "literature", "social"))
+            self.assertEqual(loaded.enabled_products, ("core", "browser_agent", "social", "weixin"))
             self.assertEqual(loaded.llm_provider, "disabled")
 
     def test_enabled_products_can_be_overridden_by_env(self) -> None:
@@ -35,19 +35,19 @@ class ConfigTest(unittest.TestCase):
             tmp_path = Path(tmp)
             config_path = tmp_path / "config.yaml"
             write_default_config(
-                server="http://localhost:28080",
+                server="http://localhost:29001",
                 config_path=config_path,
                 data_dir=tmp_path / "data",
             )
-            previous = os.environ.get("QIYUAN_WORKER_ENABLED_PRODUCTS")
-            os.environ["QIYUAN_WORKER_ENABLED_PRODUCTS"] = "core,social"
+            previous = os.environ.get("BROWSER_AGENT_WORKER_ENABLED_PRODUCTS")
+            os.environ["BROWSER_AGENT_WORKER_ENABLED_PRODUCTS"] = "core,social"
             try:
                 loaded = load_config(config_path)
             finally:
                 if previous is None:
-                    os.environ.pop("QIYUAN_WORKER_ENABLED_PRODUCTS", None)
+                    os.environ.pop("BROWSER_AGENT_WORKER_ENABLED_PRODUCTS", None)
                 else:
-                    os.environ["QIYUAN_WORKER_ENABLED_PRODUCTS"] = previous
+                    os.environ["BROWSER_AGENT_WORKER_ENABLED_PRODUCTS"] = previous
 
             self.assertEqual(loaded.enabled_products, ("core", "social"))
 

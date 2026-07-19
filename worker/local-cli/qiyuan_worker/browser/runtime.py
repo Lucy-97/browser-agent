@@ -73,7 +73,7 @@ class BrowserRuntime:
 
         # Optionally clear the persistent profile to start with a clean session.
         # This is useful when a previous session was flagged by anti-bot systems
-        # (e.g. Google Scholar CAPTCHA), so the accumulated cookies/fingerprint are
+        # (for example, a target-site CAPTCHA), so the accumulated cookies/fingerprint are
         # discarded and a fresh session is established.
         if self.config.clear_profile and self.config.profile_dir.exists():
             shutil.rmtree(self.config.profile_dir, ignore_errors=True)
@@ -111,8 +111,8 @@ class BrowserRuntime:
                 else:
                     raise channel_exc
             # Inject anti-fingerprint scripts before any page navigation.
-            # This hides common Playwright automation signals that sites like
-            # Google Scholar use to detect automated browsers.
+            # This hides common Playwright automation signals used by target sites
+            # to detect automated browsers.
             await context.add_init_script("""() => {
                 // Hide webdriver flag
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });

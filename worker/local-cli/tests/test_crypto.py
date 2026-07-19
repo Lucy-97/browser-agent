@@ -14,7 +14,7 @@ class SecretStoreTests(unittest.TestCase):
             with patch("qiyuan_worker.crypto.platform.system", return_value="Darwin"):
                 with patch.dict(
                     "os.environ",
-                    {"QIYUAN_WORKER_ALLOW_INSECURE_FILE_SECRETS": "1"},
+                    {"BROWSER_AGENT_WORKER_ALLOW_INSECURE_FILE_SECRETS": "1"},
                     clear=False,
                 ):
                     store = build_secret_store(Path(tmpdir))

@@ -2,7 +2,7 @@ const API_PREFIX = process.env.NEXT_PUBLIC_API_PREFIX || "/api";
 
 function getAdminToken() {
   if (typeof window !== "undefined") {
-    return localStorage.getItem("qiyuan.adminToken") || "";
+    return localStorage.getItem("browser-agent.adminToken") || "";
   }
   return "";
 }

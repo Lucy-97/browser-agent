@@ -8,12 +8,12 @@ from pathlib import Path
 from .errors import ConfigError
 
 
-env_suffix = os.environ.get("QIYUAN_ENV", "default")
+env_suffix = os.environ.get("BROWSER_AGENT_ENV") or os.environ.get("QIYUAN_ENV", "default")
 APP_DIR_NAME = f"QIYUAN Worker {env_suffix}"
-DEFAULT_SERVER = "http://localhost:28080"
+DEFAULT_SERVER = "http://localhost:29001"
 DEFAULT_POLL_INTERVAL_SECONDS = 10
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
-DEFAULT_ENABLED_PRODUCTS = ("core", "browser_agent", "literature", "social", "weixin")
+DEFAULT_ENABLED_PRODUCTS = ("core", "browser_agent", "social", "weixin")
 
 
 @dataclass(frozen=True)
@@ -128,7 +128,9 @@ def load_config(config_path: Path | None = None) -> WorkerConfig:
                 values.get("heartbeat_interval_seconds", DEFAULT_HEARTBEAT_INTERVAL_SECONDS)
             ),
             enabled_products=_parse_csv(
-                os.environ.get("QIYUAN_WORKER_ENABLED_PRODUCTS") or values.get("enabled_products"),
+                os.environ.get("BROWSER_AGENT_WORKER_ENABLED_PRODUCTS")
+                or os.environ.get("QIYUAN_WORKER_ENABLED_PRODUCTS")
+                or values.get("enabled_products"),
                 DEFAULT_ENABLED_PRODUCTS,
             ),
             llm_provider=os.environ.get("LLM_PROVIDER") or values.get("llm_provider") or "disabled",
