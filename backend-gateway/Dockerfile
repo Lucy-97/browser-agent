@@ -1,4 +1,4 @@
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /src
 
@@ -8,10 +8,15 @@ RUN go mod download
 
 # Copy source code and build
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/gateway ./cmd/gateway
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 
-# Stage 2: Minimal runtime
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=builder /out/gateway /gateway
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S -g 10001 browseragent \
+    && adduser -S -D -H -u 10001 -G browseragent browseragent
+COPY --from=builder --chown=browseragent:browseragent /out/gateway /gateway
+USER browseragent:browseragent
 EXPOSE 8080
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
+  CMD wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1
 CMD ["/gateway"]

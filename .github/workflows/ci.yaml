@@ -24,6 +24,7 @@ jobs:
         working-directory: backend-gateway
         run: |
           go mod tidy
+          git diff --exit-code -- go.mod go.sum
           go vet ./...
           go build ./...
           go test ./...
@@ -49,6 +50,25 @@ jobs:
           npm ci
           npx tsc --noEmit
           npm run build --if-present
+
+  production-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验生产部署脚本和 Compose
+        working-directory: deploy/production
+        run: |
+          bash -n check-env.sh deploy.sh migrate.sh
+          cp .env.example .env
+          sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=${GITHUB_SHA}/" .env
+          mkdir -p secrets
+          openssl rand -hex 32 > secrets/jwt_secret.txt
+          openssl rand -hex 32 > secrets/internal_api_secret.txt
+          openssl rand -hex 24 > secrets/db_password.txt
+          openssl rand -hex 24 > secrets/redis_password.txt
+          printf 'browser_agent:secret@tcp(mysql.example.internal:3306)/browser_agent?parseTime=true&tls=true\n' > secrets/mysql_dsn.txt
+          PRODUCTION_ENV_FILE="$PWD/.env" bash check-env.sh
+          docker compose --env-file .env -f compose.yaml config --quiet
 
   frontend-admin:
     runs-on: ubuntu-latest

@@ -1,6 +1,13 @@
 package config
 
-import "os"
+import (
+	"crypto/tls"
+	"crypto/x509"
+	"fmt"
+	"net"
+	"os"
+	"strings"
+)
 
 type Config struct {
 	Addr                   string
@@ -24,6 +31,9 @@ type Config struct {
 	RedisAddr              string
 	RedisPassword          string
 	RedisDB                int
+	RedisTLSEnabled        bool
+	RedisTLSServerName     string
+	RedisTLSCAFile         string
 	AdminAPIURL            string
 }
 
@@ -35,7 +45,7 @@ func Load() Config {
 	return Config{
 		Addr:                   addr,
 		ArtifactDir:            os.Getenv("ARTIFACT_DIR"),
-		InternalSecret:         os.Getenv("INTERNAL_SECRET"),
+		InternalSecret:         envOrFile("INTERNAL_SECRET"),
 		AdminAPIToken:          os.Getenv("ADMIN_API_TOKEN"),
 		WebAPIToken:            os.Getenv("WEB_API_TOKEN"),
 		DefaultTenantID:        envString("DEFAULT_TENANT_ID", "tenant_local"),
@@ -43,19 +53,69 @@ func Load() Config {
 		RequireTenantIdentity:  envBool("REQUIRE_TENANT_IDENTITY", false),
 		RequireMembership:      envBool("REQUIRE_MEMBERSHIP_VALIDATION", false),
 		RequirePairingApproval: envBool("REQUIRE_WORKER_PAIRING_APPROVAL", false),
-		JWTSecret:              os.Getenv("JWT_SECRET"),
+		JWTSecret:              envOrFile("JWT_SECRET"),
 		JWTAccessTokenExpSec:   envInt("JWT_ACCESS_TOKEN_EXP_SEC", 3600),
 		AuthCookieName:         envString("AUTH_COOKIE_NAME", "browser_agent_access"),
 		AuthCookieSecure:       envBool("AUTH_COOKIE_SECURE", false),
 		AllowRegistration:      envBool("ALLOW_PUBLIC_REGISTRATION", false),
-		MySQLDSN:               os.Getenv("MYSQL_DSN"),
+		MySQLDSN:               envOrFile("MYSQL_DSN"),
 		MySQLMaxOpen:           envInt("MYSQL_MAX_OPEN_CONNS", 10),
 		MySQLMaxIdle:           envInt("MYSQL_MAX_IDLE_CONNS", 5),
 		RedisAddr:              os.Getenv("REDIS_ADDR"),
-		RedisPassword:          os.Getenv("REDIS_PASSWORD"),
+		RedisPassword:          envOrFile("REDIS_PASSWORD"),
 		RedisDB:                envInt("REDIS_DB", 0),
+		RedisTLSEnabled:        envBool("REDIS_TLS_ENABLED", false),
+		RedisTLSServerName:     os.Getenv("REDIS_TLS_SERVER_NAME"),
+		RedisTLSCAFile:         os.Getenv("REDIS_TLS_CA_FILE"),
 		AdminAPIURL:            os.Getenv("ADMIN_API_BASE_URL"),
 	}
+}
+
+func (cfg Config) RedisTLSConfig() (*tls.Config, error) {
+	if !cfg.RedisTLSEnabled {
+		return nil, nil
+	}
+	serverName := strings.TrimSpace(cfg.RedisTLSServerName)
+	if serverName == "" {
+		host, _, err := net.SplitHostPort(cfg.RedisAddr)
+		if err != nil {
+			return nil, fmt.Errorf("derive Redis TLS server name from REDIS_ADDR: %w", err)
+		}
+		serverName = host
+	}
+
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, ServerName: serverName}
+	if cfg.RedisTLSCAFile == "" {
+		return tlsConfig, nil
+	}
+	caPEM, err := os.ReadFile(cfg.RedisTLSCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read REDIS_TLS_CA_FILE: %w", err)
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		return nil, fmt.Errorf("load system certificate pool: %w", err)
+	}
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return nil, fmt.Errorf("REDIS_TLS_CA_FILE contains no valid certificates")
+	}
+	tlsConfig.RootCAs = roots
+	return tlsConfig, nil
+}
+
+func envOrFile(key string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	path := strings.TrimSpace(os.Getenv(key + "_FILE"))
+	if path == "" {
+		return ""
+	}
+	value, err := os.ReadFile(path)
+	if err != nil {
+		panic("failed to read " + key + "_FILE: " + err.Error())
+	}
+	return strings.TrimSpace(string(value))
 }
 
 func envString(key string, fallback string) string {

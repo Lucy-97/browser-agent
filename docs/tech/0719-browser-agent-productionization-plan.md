@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-19：落地 Phase 2 第一批生产基线：统一生产 Compose 入口、完整 commit SHA 镜像发布、文件 Secret、MySQL migration job、MySQL/Redis TLS、健康检查、资源限制和手动部署/回滚；实际云资源、对象存储、备份恢复和 staging E2E 尚待完成。
 - 2026-07-19：完成 Phase 1 客户身份主链路：`users` schema/migration、邮箱密码注册登录、租户 owner 创建、JWT + HttpOnly Cookie、active membership 在线校验、登录路径限流、登录/Worker 配对 Web UI 和本地 Gateway 端到端验收。
 - 2026-07-19：同步 Phase 1 首批实现：新增租户 schema/migration、Automation/Worker resource ownership、可信 Gateway 身份头、严格配对批准与双租户越权测试；真实账号登录和 membership 校验尚未完成。
 - 2026-07-19：首次建立线上客户交付与生产化技术基线，确定“云端控制面 + 客户本机 Worker”的首期形态，并拆分账号租户、部署、数据安全、Worker 交付、可观测性和发布门禁。
@@ -316,8 +317,8 @@ tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
 - [ ] 建立 staging/production 环境和固定域名/TLS。
 - [ ] 接入托管 MySQL、Redis、对象存储和 Secret Manager。
 - [ ] 建立 migration job、自动备份和恢复演练。
-- [ ] 修复并统一 Compose/K3s 与当前应用配置，选择一个受支持的生产部署入口。
-- [ ] 完成不可变镜像构建、部署和回滚流水线。
+- [x] 修复并统一当前应用配置，选择 `deploy/production/compose.yaml` 作为唯一受支持的生产入口；K3s 保留为实验草案。
+- [x] 完成 API/Gateway/Web 的不可变 GHCR 镜像构建/推送，以及基于完整 commit SHA 的部署和手动回滚入口。
 
 **验收门禁**：staging 重建后无需手工修改容器即可启动；升级、回滚、备份恢复和 artifact 下载均通过验收。
 

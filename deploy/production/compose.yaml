@@ -1,0 +1,182 @@
+name: browser-agent-production
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+services:
+  migration:
+    image: ${MYSQL_CLIENT_IMAGE:?set MYSQL_CLIENT_IMAGE to a pinned MySQL 8 client image}
+    profiles: ["tools"]
+    entrypoint: ["/bin/bash", "/deploy/migrate.sh"]
+    environment:
+      DB_HOST: ${DB_HOST:?set DB_HOST}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_USER: ${DB_USER:?set DB_USER}
+      DB_NAME: ${DB_NAME:?set DB_NAME}
+      DB_SSL_MODE: ${DB_SSL_MODE:-VERIFY_IDENTITY}
+      DB_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - ../../database:/schema:ro
+      - ./migrate.sh:/deploy/migrate.sh:ro
+    networks:
+      - backend
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  api:
+    <<: *service-defaults
+    image: ${IMAGE_REPOSITORY_PREFIX:?set IMAGE_REPOSITORY_PREFIX}-api:${IMAGE_TAG:?set immutable IMAGE_TAG}
+    pull_policy: always
+    environment:
+      API_ADDR: ":8001"
+      ARTIFACT_DIR: /var/lib/browser-agent/artifacts
+      INTERNAL_SECRET_FILE: /run/secrets/internal_api_secret
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      MYSQL_DSN_FILE: /run/secrets/mysql_dsn
+      MYSQL_MAX_OPEN_CONNS: ${MYSQL_MAX_OPEN_CONNS:-20}
+      MYSQL_MAX_IDLE_CONNS: ${MYSQL_MAX_IDLE_CONNS:-10}
+      REDIS_ADDR: ${REDIS_ADDR:?set REDIS_ADDR}
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_TLS_ENABLED: ${REDIS_TLS_ENABLED:-true}
+      REDIS_TLS_SERVER_NAME: ${REDIS_TLS_SERVER_NAME:?set REDIS_TLS_SERVER_NAME}
+      PUBLIC_WEB_BASE_URL: ${PUBLIC_WEB_BASE_URL:?set PUBLIC_WEB_BASE_URL}
+      JWT_ACCESS_TOKEN_EXP_SEC: ${JWT_ACCESS_TOKEN_EXP_SEC:-3600}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-browser_agent_access}
+      AUTH_COOKIE_SECURE: "true"
+      ALLOW_PUBLIC_REGISTRATION: "false"
+      REQUIRE_TENANT_IDENTITY: "true"
+      REQUIRE_MEMBERSHIP_VALIDATION: "true"
+      REQUIRE_WORKER_PAIRING_APPROVAL: "true"
+    secrets:
+      - internal_api_secret
+      - jwt_secret
+      - mysql_dsn
+      - redis_password
+    volumes:
+      - artifact_data:/var/lib/browser-agent/artifacts
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    read_only: true
+    expose:
+      - "8001"
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  gateway:
+    <<: *service-defaults
+    image: ${IMAGE_REPOSITORY_PREFIX:?set IMAGE_REPOSITORY_PREFIX}-gateway:${IMAGE_TAG:?set immutable IMAGE_TAG}
+    pull_policy: always
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      GATEWAY_PORT: "8080"
+      API_SERVICE_URL: http://api:8001
+      AI_ENGINE_SERVICE_URL: ${AI_ENGINE_SERVICE_URL:-http://127.0.0.1:9}
+      INTERNAL_API_SECRET_FILE: /run/secrets/internal_api_secret
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      JWT_ACCESS_TOKEN_EXP_SEC: ${JWT_ACCESS_TOKEN_EXP_SEC:-3600}
+      JWT_REFRESH_TOKEN_EXP_DAYS: ${JWT_REFRESH_TOKEN_EXP_DAYS:-30}
+      AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-browser_agent_access}
+      CORS_ORIGINS: ${PUBLIC_WEB_BASE_URL:?set PUBLIC_WEB_BASE_URL}
+      REDIS_HOST: ${REDIS_HOST:?set REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_REQUIRED: ${REDIS_REQUIRED:-true}
+      REDIS_TLS_ENABLED: ${REDIS_TLS_ENABLED:-true}
+      REDIS_TLS_SERVER_NAME: ${REDIS_TLS_SERVER_NAME:?set REDIS_TLS_SERVER_NAME}
+    secrets:
+      - internal_api_secret
+      - jwt_secret
+      - redis_password
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    read_only: true
+    expose:
+      - "8080"
+    networks:
+      - edge
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.20"
+          memory: 96M
+
+  web:
+    <<: *service-defaults
+    image: ${IMAGE_REPOSITORY_PREFIX:?set IMAGE_REPOSITORY_PREFIX}-web:${IMAGE_TAG:?set immutable IMAGE_TAG}
+    pull_policy: always
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: "0.0.0.0"
+    ports:
+      - ${WEB_BIND_HOST:-127.0.0.1}:${WEB_BIND_PORT:-3000}:3000
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/.next/cache:rw,noexec,nosuid,size=128m
+    read_only: true
+    networks:
+      - edge
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
+        reservations:
+          cpus: "0.20"
+          memory: 128M
+
+networks:
+  edge:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  artifact_data:
+
+secrets:
+  jwt_secret:
+    file: ${JWT_SECRET_FILE:?set JWT_SECRET_FILE}
+  internal_api_secret:
+    file: ${INTERNAL_API_SECRET_FILE:?set INTERNAL_API_SECRET_FILE}
+  mysql_dsn:
+    file: ${MYSQL_DSN_FILE:?set MYSQL_DSN_FILE}
+  db_password:
+    file: ${DB_PASSWORD_FILE:?set DB_PASSWORD_FILE}
+  redis_password:
+    file: ${REDIS_PASSWORD_FILE:?set REDIS_PASSWORD_FILE}

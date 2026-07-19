@@ -29,14 +29,25 @@ import (
 
 func main() {
 	cfg := config.Load()
+	redisTLSConfig, err := cfg.Redis.TLSConfig()
+	if err != nil {
+		slog.Error("Invalid Redis TLS configuration", "error", err)
+		os.Exit(1)
+	}
 
 	// ─── Redis 连接（限流计数）───
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port),
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
+		Addr:      fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port),
+		Password:  cfg.Redis.Password,
+		DB:        cfg.Redis.DB,
+		TLSConfig: redisTLSConfig,
 	})
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		if cfg.Redis.Required {
+			slog.Error("Required Redis connection failed", "error", err)
+			_ = rdb.Close()
+			os.Exit(1)
+		}
 		slog.Warn("Redis connection failed, rate limiting disabled", "error", err)
 		rdb = nil
 	} else {

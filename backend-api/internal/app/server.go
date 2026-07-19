@@ -86,11 +86,16 @@ func buildClaimLocker(cfg config.Config) lock.Locker {
 	if cfg.RedisAddr == "" {
 		return lock.NoopLocker{}
 	}
+	tlsConfig, err := cfg.RedisTLSConfig()
+	if err != nil {
+		panic(err)
+	}
 	return lock.NewRedisLocker(lock.RedisConfig{
-		Addr:     cfg.RedisAddr,
-		Password: cfg.RedisPassword,
-		DB:       cfg.RedisDB,
-		Timeout:  2 * time.Second,
+		Addr:      cfg.RedisAddr,
+		Password:  cfg.RedisPassword,
+		DB:        cfg.RedisDB,
+		Timeout:   2 * time.Second,
+		TLSConfig: tlsConfig,
 	})
 }
 

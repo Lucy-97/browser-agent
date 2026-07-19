@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -15,10 +16,11 @@ import (
 )
 
 type RedisConfig struct {
-	Addr     string
-	Password string
-	DB       int
-	Timeout  time.Duration
+	Addr      string
+	Password  string
+	DB        int
+	Timeout   time.Duration
+	TLSConfig *tls.Config
 }
 
 type RedisLocker struct {
@@ -61,6 +63,14 @@ func (locker *RedisLocker) dial(ctx context.Context) (net.Conn, *bufio.Reader, e
 	conn, err := dialer.DialContext(ctx, "tcp", locker.config.Addr)
 	if err != nil {
 		return nil, nil, err
+	}
+	if locker.config.TLSConfig != nil {
+		tlsConn := tls.Client(conn, locker.config.TLSConfig.Clone())
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return nil, nil, fmt.Errorf("Redis TLS handshake: %w", err)
+		}
+		conn = tlsConn
 	}
 	reader := bufio.NewReader(conn)
 
