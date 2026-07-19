@@ -456,6 +456,7 @@ func (handler *Handler) createWebBrowserAgentJob(w http.ResponseWriter, r *http.
 		jobType:             "generic.browser.agent",
 		adapter:             "generic.browser_agent",
 		defaultMode:         "llm_plan",
+		allowDeterministic:  true,
 		allowedActions:      []string{"observe_page", "fill", "click", "click_element", "press", "extract", "screenshot", "wait_for"},
 		allowDownloadAction: true,
 	})
@@ -661,6 +662,7 @@ type browserJobRequestConfig struct {
 	jobType             string
 	adapter             string
 	defaultMode         string
+	allowDeterministic  bool
 	allowedActions      []string
 	allowDownloadAction bool
 }
@@ -673,6 +675,11 @@ func (handler *Handler) createBrowserJob(w http.ResponseWriter, r *http.Request,
 		AllowDownload    bool     `json:"allow_download"`
 		Headed           *bool    `json:"headed"`
 		ActionTimeoutSec int      `json:"action_timeout_seconds"`
+		Mode             string   `json:"mode"`
+		Query            string   `json:"query"`
+		InputSelector    string   `json:"input_selector"`
+		SubmitSelector   string   `json:"submit_selector"`
+		ResultSelector   string   `json:"result_selector"`
 	}
 	if err := basehandler.DecodeJSON(r, &req); err != nil {
 		basehandler.WriteError(w, http.StatusBadRequest, "INVALID_JSON", err.Error(), false)
@@ -700,6 +707,14 @@ func (handler *Handler) createBrowserJob(w http.ResponseWriter, r *http.Request,
 	if timeout > 120 {
 		timeout = 120
 	}
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		mode = cfg.defaultMode
+	}
+	if mode != cfg.defaultMode && !(cfg.allowDeterministic && mode == "deterministic_search") {
+		basehandler.WriteError(w, http.StatusBadRequest, "INVALID_AGENT_MODE", "mode is not supported for this endpoint", false)
+		return
+	}
 	allowedActions := append([]string{}, cfg.allowedActions...)
 	if cfg.allowDownloadAction && req.AllowDownload {
 		allowedActions = append(allowedActions, "download")
@@ -707,10 +722,25 @@ func (handler *Handler) createBrowserJob(w http.ResponseWriter, r *http.Request,
 	input := map[string]any{
 		"url":  startURL,
 		"task": task,
-		"mode": cfg.defaultMode,
+		"mode": mode,
 	}
-	if cfg.defaultMode == "llm_plan" {
+	if mode == "llm_plan" {
 		input["query"] = task
+	} else {
+		query := strings.TrimSpace(req.Query)
+		if query == "" {
+			query = task
+		}
+		input["query"] = query
+		if value := strings.TrimSpace(req.InputSelector); value != "" {
+			input["input_selector"] = value
+		}
+		if value := strings.TrimSpace(req.SubmitSelector); value != "" {
+			input["submit_selector"] = value
+		}
+		if value := strings.TrimSpace(req.ResultSelector); value != "" {
+			input["result_selector"] = value
+		}
 	}
 	job := handler.engine.CreateJob(automationmodel.CreateJobRequest{
 		JobType: cfg.jobType,

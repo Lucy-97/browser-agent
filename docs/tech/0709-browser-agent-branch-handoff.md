@@ -2,13 +2,14 @@
 
 ## Changelog
 
+- 2026-07-19：同步 `feature/browser-agent` 已合入 `main` 的现状，记录 Windows Web → Worker → Admin 端到端验收脚本和已完成的干净环境验证。
 - 2026-07-09：首次整理 `feature/browser-agent` 分支交接说明，覆盖分支定位、当前实现状态、本地启动、核心代码地图、任务链路、已落地 adapter、验证命令、风险边界和后续待办。
 
 ---
 
 ## 一、交接范围
 
-本文面向后续接手 `feature/browser-agent` 分支的研发、运维或编码 Agent，用于快速理解当前分支的业务定位、代码入口、运行方式和风险边界。
+本文面向后续接手 Browser Agent 主线的研发、运维或编码 Agent，用于快速理解业务定位、代码入口、运行方式和风险边界。`feature/browser-agent` 的实现已合入 `main`，新工作应以当前任务指定的目标分支为准。
 
 `feature/browser-agent` 当前定位是 **通用 Browser Agent 底座 + 泛互联网自动化运营分支**，主要承载：
 
@@ -39,7 +40,7 @@
 | 微信资料同步 | 已实现 MVP | `weixin.desktop_sync` 扫描本机微信下载/附件目录，上传文件 artifact 和 manifest |
 | Web | 已实现业务入口 | 版权检索、社媒运营/上传、微信群同步、本地 Worker 引导、任务与 artifact 查看 |
 | Admin | 已实现运维入口 | Jobs、Runs、Devices、Manual Actions、Run trace、artifact 下载、cancel/revoke |
-| 验证脚本 | 已有基础脚本 | `10-automation-mock.sh`、`20-automation-mysql-smoke.sh`；文档中仍提到 `30-browser-agent-demo.sh`，需按当前文件状态复核 |
+| 验证脚本 | 已覆盖基础与 Windows 浏览器链路 | `10-automation-mock.sh`、`20-automation-mysql-smoke.sh`、`30-browser-agent-windows.ps1` |
 
 ---
 
@@ -287,10 +288,9 @@ Web /web/automation/weixin-desktop-sync-jobs
 ### P0 / 近期
 
 - 清理或标注文档中的旧 QIYUAN/文献/知识图谱表述，避免和 `feature/qiyuan` 职责混淆。
-- 复核 `deploy-local/guide.md` 中 `QIYUAN_ENV=browser-agent` 示例，修正文中仍使用 `qiyuan` 的命令片段。
-- 为当前真实存在的验证脚本补齐文档状态；若 `30-browser-agent-demo.sh` 已迁移或删除，需要更新 guide 和交接说明。
 - 为社媒自动发布能力补安全确认：哪些平台允许自动发布、哪些场景必须人工确认、如何记录审计。
-- 补一次干净环境验收：启动 infra/API/Web/Admin/Worker，跑 mock + MySQL smoke，至少创建一个 Web 任务并观察 run/artifact。
+
+已于 2026-07-19 完成 Windows 干净环境启动和 Web → Worker → Admin 验收；`deploy-local/integration-test/30-browser-agent-windows.ps1` 会创建确定性 Browser Agent 任务并校验 trace、截图。
 
 ### P1 / 中期
 
@@ -312,7 +312,7 @@ Web /web/automation/weixin-desktop-sync-jobs
 
 ## 八、接手注意事项
 
-1. 先确认分支：`git branch --show-current` 应为 `feature/browser-agent`。
+1. 先确认分支：Browser Agent 已合入 `main`，以当前任务约定的目标分支为准，不再强制要求 `feature/browser-agent`。
 2. 先读 `README.md`、本文和 `docs/brd/0627-browser-agent-automation-brd.md`，再进入具体模块。
 3. 不要把 AI 4 Science / 文献解析 / Neo4j / MCP 新需求继续扩进本分支。
 4. 不要绕过 go-api 写 MySQL；Worker 只通过 API 上报状态、artifact 和 manual action。
@@ -325,7 +325,7 @@ Web /web/automation/weixin-desktop-sync-jobs
 
 ## 九、建议接手检查清单
 
-- [ ] 当前分支为 `feature/browser-agent`。
+- [ ] 当前分支符合本次任务约定，且不是误在其他产品分支修改。
 - [ ] 工作区没有用户未提交改动，或已明确哪些改动不能触碰。
 - [ ] `export QIYUAN_ENV=browser-agent` 后启动本地服务。
 - [ ] Web 和 Admin 均可访问，真实端口已从 `deploy-local/run/*.port` 确认。

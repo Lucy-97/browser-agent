@@ -2,13 +2,12 @@
 
 ## Changelog
 
+- 2026-07-19：新增 Windows Browser Agent 一键端到端验收，通过 Web 代理创建确定性任务、真实 Chromium 执行，并从 Admin 代理校验 run、trace 和截图；移除已失效的旧 demo 命令。
 - 2026-07-17：新增 Windows 原生平台与 Worker 启停脚本，覆盖 Go API、Web、Admin、Worker 的隐藏窗口常驻运行、状态检查、日志和 PID 管理。
 - 2026-06-27：引入本地多环境隔离机制（qiyuan 与 browser-agent）。支持通过 `QIYUAN_ENV` 变量无缝切换不同的底层容器（MySQL/Redis/Neo4j）和宿主机端口，实现单机双分支安全并存。
 - 2026-06-19：补充完整本地验收流程，覆盖环境检查、API/Worker 常驻启动、日志观察、mock/MySQL/Browser Agent/Google Scholar PDF demo、artifact 校验、manual action 和 Worker token 失效处理。
 - 2026-06-19：本机默认端口整体上移 20000，避让同机多项目开发端口冲突。
 - 2026-06-18：调整 demo 为常驻 Worker 形态：`run-worker-host-local.sh` 新增 `deploy-local/logs/worker-local.log` 常驻日志。
-- 2026-06-18：Browser Agent 本地 demo 支持可视化运行：`HEADED=1 PAUSE_AFTER_SECONDS=10 bash deploy-local/integration-test/30-browser-agent-demo.sh`。
-- 2026-06-18：新增 Browser Agent 本地 demo 验收脚本 `deploy-local/integration-test/30-browser-agent-demo.sh`，用于验证 `generic.browser_agent` adapter 可操作 Chromium 打开本地 fixture、完成搜索、上传 trace 和截图 artifact。
 - 2026-06-18：新增 `frontend-admin` Vite/React 调试控制台和 `run-admin-host-local.sh`，并将 `run-api-host-local.sh` 调整为 tmux 常驻模式，避免宿主进程被 shell 回收。
 - 2026-06-18：补齐本地 MySQL/Redis infra compose、schema apply 脚本和 MySQL 持久化 smoke test。`backend-api` 现在可在 `MYSQL_DSN` + `REDIS_ADDR` 下跑通 Automation 持久化闭环。
 - 2026-06-18：新增当前可用的 `backend-api` 宿主机启动方式和 Automation mock smoke test。Docker Compose、Gateway、Admin、Web 和 MySQL 持久化链路仍按后续迭代补齐。
@@ -232,19 +231,13 @@ bash deploy-local/integration-test/20-automation-mysql-smoke.sh
 
 脚本会启动 MySQL/Redis、应用 schema、在 `:38001` 临时启动 MySQL 模式 API，并验证 pairing、heartbeat、job claim、checkpoint、artifact、本地文件 artifact 上传下载、PDF artifact 入解析队列、internal parser claim/parsed 写回、manual action resolve、列表查询、设备撤销和 revoked token 拒绝。
 
-Browser Agent 本地 demo：
+Browser Agent Windows 端到端验收：
 
-```bash
-bash deploy-local/integration-test/30-browser-agent-demo.sh
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/integration-test/30-browser-agent-windows.ps1 -Environment browser-agent
 ```
 
-该脚本要求本地 API 已启动，Worker 已完成 `init` 和 `pair`，且本机 Python 环境可使用 Playwright/Chromium。脚本会创建 `generic.browser.agent` job，让 Worker 控制 Chromium 打开 `deploy-local/mock/browser-agent-demo.html`，执行搜索、抽取结果，并校验 run completed、结果数量、`agent_trace` artifact 和最终截图 artifact。
-
-默认脚本使用 headless Chromium，所以终端只会输出通过结果，不会弹浏览器。需要肉眼看浏览器动作时使用：
-
-```bash
-HEADED=1 PAUSE_AFTER_SECONDS=10 bash deploy-local/integration-test/30-browser-agent-demo.sh
-```
+该脚本要求 API、Web、Admin 和已配对 Worker 均已启动。它通过 Web 的 Next.js 代理创建 `deterministic_search` 任务，让 Worker 控制真实 headless Chromium 打开内嵌 fixture、填写并提交搜索；随后通过 Web 查询 run，并通过 Admin 代理校验任务完成以及 `agent_trace`、`screenshot` 两类 artifact。此模式不调用 LLM，适合稳定的环境验收。
 
 ## 四、完整本地验收流程
 
@@ -317,16 +310,19 @@ worker.job_finished job_id=... status=...
 
 `10` 验证内存/当前 API 的 job/run/artifact 生命周期。`20` 验证 MySQL/Redis 持久化、artifact 文件上传下载、PDF artifact 入解析队列、internal parser 写回、manual action resolve、设备撤销和 revoked token 拒绝。
 
-### 5. 跑 Browser Agent 可视化 demo
+### 5. 跑 Browser Agent Windows 端到端验收
 
-```bash
-HEADED=1 PAUSE_AFTER_SECONDS=10 ./integration-test/30-browser-agent-demo.sh
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/integration-test/30-browser-agent-windows.ps1 -Environment browser-agent
 ```
 
 期望输出：
 
 ```text
-browser agent demo passed job=... run=... artifacts=['agent_trace', 'screenshot']
+browser agent Windows E2E passed
+job=...
+run=...
+artifacts=agent_trace,screenshot
 ```
 
 ### 6. 验证 artifact 和本地执行记录

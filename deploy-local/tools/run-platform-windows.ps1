@@ -57,6 +57,10 @@ function Start-Platform {
     New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
     $env:ARTIFACT_DIR = $artifactDir
 
+    $apiPort = $env:API_ADDR.TrimStart(':')
+    $env:GO_API_BASE_URL = "http://127.0.0.1:$apiPort"
+    $env:ADMIN_API_BASE_URL = $env:GO_API_BASE_URL
+
     $goCommand = Get-Command go.exe -ErrorAction SilentlyContinue
     if ($goCommand) {
         $go = $goCommand.Source
@@ -96,7 +100,7 @@ function Start-Platform {
         -RedirectStandardError (Join-Path $LogDir "$Environment-frontend-admin.error.log") -PassThru
     Set-Content -LiteralPath (Join-Path $RunDir "$Environment-frontend-admin.pid") -Value $admin.Id
 
-    Write-Output "API:   http://localhost:$($env:API_ADDR.TrimStart(':'))"
+    Write-Output "API:   http://localhost:$apiPort"
     Write-Output "Web:   http://localhost:$($env:WEB_PORT)"
     Write-Output "Admin: http://localhost:$($env:ADMIN_PORT)"
 }

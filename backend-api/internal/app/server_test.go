@@ -253,6 +253,51 @@ func TestCreateWebBrowserActJob(t *testing.T) {
 	}
 }
 
+func TestCreateWebBrowserAgentDeterministicJob(t *testing.T) {
+	server := NewServer().Handler()
+
+	resp := postJSON(t, server, "/web/automation/browser-agent-jobs", map[string]any{
+		"url":             "data:text/html,test",
+		"task":            "search fixture",
+		"allowed_domains": []string{"data:"},
+		"mode":            "deterministic_search",
+		"query":           "LiFePO4",
+		"input_selector":  "#search",
+		"submit_selector": "#submit",
+		"result_selector": ".result",
+		"headed":          false,
+	}, "")
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("create deterministic browser agent job status = %d body=%s", resp.Code, resp.Body.String())
+	}
+	var job map[string]any
+	decodeJSON(t, resp, &job)
+	if job["adapter"] != "generic.browser_agent" {
+		t.Fatalf("adapter = %v", job["adapter"])
+	}
+	input := job["input"].(map[string]any)
+	if input["mode"] != "deterministic_search" || input["query"] != "LiFePO4" {
+		t.Fatalf("input = %#v", input)
+	}
+	if input["input_selector"] != "#search" || input["result_selector"] != ".result" {
+		t.Fatalf("selectors = %#v", input)
+	}
+}
+
+func TestCreateWebBrowserActJobRejectsDeterministicMode(t *testing.T) {
+	server := NewServer().Handler()
+
+	resp := postJSON(t, server, "/web/automation/browser-act-jobs", map[string]any{
+		"url":             "https://example.com",
+		"task":            "open example",
+		"allowed_domains": []string{"example.com"},
+		"mode":            "deterministic_search",
+	}, "")
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("unsupported browser.act mode status = %d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestCreateWebSocialUploadJob(t *testing.T) {
 	server := NewServer().Handler()
 
