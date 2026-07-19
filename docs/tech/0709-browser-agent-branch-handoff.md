@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-19：同步线上客户交付路线，将账号租户隔离、生产部署、对象存储和 Worker 客户端交付提升为上线阻断项，并增加生产化技术方案索引。
 - 2026-07-19：仓库收敛为单一 Browser Agent 项目，`main` 为唯一长期主线；同步单环境启动方式、Windows Web → Worker → Admin 端到端验收和后续优先级。
 - 2026-07-09：首次整理 Browser Agent 交接说明，覆盖项目定位、当前实现状态、本地启动、核心代码地图、任务链路、已落地 adapter、验证命令、风险边界和后续待办。
 
@@ -272,6 +273,7 @@ Web /web/automation/weixin-desktop-sync-jobs
 | `docs/tech/0617-local-automation-platform-iteration-plan.md` | 平台级总计划与历史落地记录 |
 | `docs/tech/0619-llm-browser-agent-integration-plan.md` | LLM Browser Agent 接入计划和未完成清单 |
 | `docs/tech/0702-weixin-group-file-sync-agent-plan.md` | 微信群资料同步 Agent 技术方案 |
+| `docs/tech/0719-browser-agent-productionization-plan.md` | 线上客户交付架构、账号租户、部署、数据、Worker、安全、监控和发布门禁 |
 
 ---
 
@@ -279,26 +281,33 @@ Web /web/automation/weixin-desktop-sync-jobs
 
 ### P0 / 近期
 
-- 定义版权检索的作品、检索条件、候选线索和取证 artifact 最小模型，跑通首个真实业务闭环。
-- 为社媒自动发布能力补安全确认：哪些平台允许自动发布、哪些场景必须人工确认、如何记录审计。
+- 建立账号、租户、membership 和 RBAC，为 Worker device、job、run、artifact、manual action 强制 resource ownership，并补跨租户越权测试。
+- 统一 Gateway 与 Automation API 的生产鉴权链路；共享 Admin/Web token 只保留为本地开发或受控诊断能力。
+- 建立 staging/production 数据与部署基线：托管 MySQL/Redis、对象存储、Secret Manager、TLS、migration、备份恢复、不可变镜像和回滚。
+- 修复现有生产 Compose/K3s 草案与当前应用在环境变量、健康检查、端口、路由和持久化方面的不一致。
 
 已于 2026-07-19 完成 Windows 干净环境启动和 Web → Worker → Admin 验收；`deploy-local/integration-test/30-browser-agent-windows.ps1` 会创建确定性 Browser Agent 任务并校验 trace、截图。
 
 ### P1 / 中期
 
+- 将本机 Worker 产品化为可签名安装、系统凭据存储、开机启动、版本兼容、受控升级和日志导出的 Windows 客户端。
+- 定义版权检索的作品、检索条件、候选线索和取证 artifact 最小模型，跑通首个真实业务闭环。
+- 为社媒自动发布能力补安全确认：哪些平台允许自动发布、哪些场景必须人工确认、如何记录审计。
 - 为 TikTok / Instagram / YouTube / Douyin 各自补稳定的 fixture 单测和手工验证清单。
 - 完善 social upload 的错误码、登录状态识别、重试边界和人工接管体验。
 - 将 `manual_publish_required`、平台 visibility、账号 profile、allowed domains 做成更明确的 policy template。
 - 完善 Generic Browser Agent 的 trace UI、prompt/token 成本审计和 provider 计量。
 - 微信同步进入第二阶段：通过桌面 UI 自动化打开群文件、触发下载，再复用本地扫描链路。
 
-### P2 / 生产化
+### P2 / 封闭内测与商用准备
 
-- 建立账号/租户/resource ownership，避免一个用户查看或下载另一个用户的 artifact。
 - 为 artifact 增加留存、删除、脱敏、敏感文件扫描和权限控制。
 - 为 Worker 增加离线告警、run 超时、任务堆积、失败率和平台登录异常监控。
 - 梳理真实平台自动化合规边界，尤其是社媒发帖、平台条款、版权取证和微信资料同步。
 - 拆分产品线 package 或 extension 发布机制，减少所有 adapter 都进入同一个 Worker 安装包。
+- 邀请少量明确授权的客户进行封闭内测，验证跨租户隔离、安装升级、任务成功率、人工接管率和单位任务成本后再评估开放注册。
+
+完整生产化阶段、技术边界和验收门禁见 `docs/tech/0719-browser-agent-productionization-plan.md`。在 P0 完成前，不得把当前 Admin/API 直接暴露到公网。
 
 ---
 

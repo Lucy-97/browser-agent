@@ -4,6 +4,7 @@
 
 ## Changelog
 
+- 2026-07-19：新增线上客户交付与生产化技术方案，明确首期采用“云端控制面 + 客户本机 Worker”，并将账号租户隔离、生产部署和 Worker 交付列为上线门禁。
 - 2026-07-19：仓库收敛为单一 Browser Agent 项目，统一以 `main` 为开发主线，移除旧业务分支和多环境切换说明。
 
 ## 一、 项目入口与 Agent 协作
@@ -50,15 +51,21 @@ Linux/macOS 上，前端和本机 API 默认在宿主机通过 tmux 启动。前
 | MySQL | `127.0.0.1:24307` |
 | Redis | `127.0.0.1:27380` |
 
+### 线上客户交付目标
+
+当前仓库已完成本地 Web → API → Worker → Admin 基础链路验证，但现有 Compose/K3s 文件和可选共享 token 仍是开发或部署骨架，不能直接作为多客户生产环境。首期线上形态统一采用“云端 Web/Admin/Gateway/API/数据服务 + 客户本机 Worker”：第三方平台登录态和浏览器 profile 默认留在客户设备，Worker 仅通过出站 HTTPS 访问云端。
+
+生产化的实施阶段、信任边界、账号租户模型、对象存储、Worker 安装升级、监控告警和上线门禁见 [Browser Agent 线上客户交付与生产化技术方案](docs/tech/0719-browser-agent-productionization-plan.md)。在账号/租户/resource ownership 和生产鉴权完成前，不得将当前 Admin/API 直接暴露到公网。
+
 ## 三、 核心微服务架构
 
 后端采用“职责解耦”的异构设计，最大化发挥不同语言的生态优势：
 
 *   **go-gateway — 流量网关**
-    *   统一请求入口（基于 Gin）。负责 C 端 JWT 鉴权、基于 Redis 的高并发限流、CORS、人机验证（Turnstile）以及长对话 SSE（Server-Sent Events）的无缓冲流式透传。
+    *   统一请求入口（基于 Gin）。已有 JWT、Redis 限流、CORS 和指标骨架；当前 Automation 的 `/web/*`、`/worker/*` 生产路由和可信身份传递仍需按生产化方案接通。
 *   **go-api — 核心业务中枢**
     *   严密的三层架构（Handler → Engine → Repo）。
-    *   **唯一写权限节点**：全系统只有 go-api 有权对 MySQL 数据库执行 `INSERT/UPDATE/DELETE`。负责账号体系、支付订阅、创作者发布及 Admin 后台管理。
+    *   **唯一写权限节点**：全系统只有 go-api 有权对 MySQL 数据库执行 `INSERT/UPDATE/DELETE`。当前已承载 Automation、Worker、artifact 和 Admin/Web 接口；账号、租户和支付等客户化能力属于待接入边界。
     *   对内部（Python）暴露 `X-Internal-Secret` 鉴权的 `/internal/*` 端点处理强一致性写操作。
 
 ### 代码目录归属(TODO)
@@ -93,8 +100,8 @@ Linux/macOS 上，前端和本机 API 默认在宿主机通过 tmux 启动。前
 *   新增或修改数据库 migration 时，必须同步更新 `database/init.sql`，确保新环境初始化后的 schema 与按历史 migrations 升级后的 schema 一致。
 *   `database/init.sql` 和 `database/migrations/` 只负责 schema 变更和必要的数据结构迁移，禁止写入业务表、配置表、提示词表、商品表、策略表等配置/种子数据。
 *   本地默认配置和 mock 种子数据统一维护在 `deploy-local/mock/` 下，由本地 mock 导入流程或 Admin/API 写入。
-*   环境变量统一归口到 `deploy-{local/sta}` 目录管理：本地开发使用 `deploy-local/.env` 与 `deploy-local/.env.example`；K3s 使用 `deploy-k3s/{sta,prod}/env.yaml` 和对应 `.env.example`。
-*   前端应用目录（例如 `frontend-web/`、`frontend-admin/`）禁止新增或维护 `.env*` 文件，Next/Vite 等前端运行变量也必须从 `deploy-{local/sta}` 注入。
+*   环境变量统一归口到部署目录管理：本地开发使用 `deploy-local/.env` 与 `deploy-local/.env.example`；现有 K3s 骨架位于 `deploy/k3s/`，在生产化方案验收前不得视为可直接上线的生产配置。
+*   前端应用目录（例如 `frontend-web/`、`frontend-admin/`）禁止新增或维护 `.env*` 文件，Next/Vite 等前端运行变量也必须从 `deploy-local/` 或后续选定的生产部署目录注入。
 
 ### 服务修改后验证
 
@@ -175,6 +182,7 @@ docker compose -f deploy-local/docker-compose-backend.yaml up -d --force-recreat
 - [0619-llm-browser-agent-integration-plan.md](docs/tech/0619-llm-browser-agent-integration-plan.md)：LLM Browser Agent 接入计划，明确 deterministic adapter 与 LLM Agent 边界、工具集、视觉/HTML 理解、阶段路线和未完成清单。
 - [0702-weixin-group-file-sync-agent-plan.md](docs/tech/0702-weixin-group-file-sync-agent-plan.md)：微信群资料同步 Agent 技术方案，规划基于 `weixin-agent-sdk` 的微信文件接收、本地归档、manifest 记录和后续资料库接入路径。
 - [0709-browser-agent-branch-handoff.md](docs/tech/0709-browser-agent-branch-handoff.md)：Browser Agent 项目交接文档，覆盖当前实现状态、本地启动、核心代码地图、任务链路、adapter 边界、风险事项和后续待办。
+- [0719-browser-agent-productionization-plan.md](docs/tech/0719-browser-agent-productionization-plan.md)：线上客户交付与生产化技术方案，定义云端控制面 + 客户本机 Worker 架构，以及账号租户、部署、数据、Worker、安全、监控和 CI/CD 上线门禁。
 
 #### `docs/tech/mvp/`
 
