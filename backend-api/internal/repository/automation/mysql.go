@@ -26,6 +26,8 @@ func (repo *MySQLRepository) CreateJob(req automationmodel.CreateJobRequest) aut
 	now := time.Now().UTC()
 	job := automationmodel.Job{
 		ID:        mysqlNewID("job"),
+		TenantID:  req.TenantID,
+		UserID:    req.UserID,
 		Type:      req.JobType,
 		Adapter:   req.Adapter,
 		Target:    mapOrEmpty(req.Target),
@@ -39,9 +41,12 @@ func (repo *MySQLRepository) CreateJob(req automationmodel.CreateJobRequest) aut
 	_, err := repo.db.ExecContext(
 		context.Background(),
 		`INSERT INTO automation_job (
-			id, job_type, adapter, status, priority, target_json, input_json, policy_json, created_at, updated_at
-		) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+			id, tenant_id, user_id, job_type, adapter, status, priority,
+			target_json, input_json, policy_json, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
 		job.ID,
+		job.TenantID,
+		job.UserID,
 		job.Type,
 		job.Adapter,
 		job.Priority,
@@ -60,7 +65,7 @@ func (repo *MySQLRepository) CreateJob(req automationmodel.CreateJobRequest) aut
 func (repo *MySQLRepository) Job(jobID string) (automationmodel.Job, error) {
 	row := repo.db.QueryRowContext(
 		context.Background(),
-		`SELECT id, job_type, adapter, status, priority, target_json, input_json, policy_json,
+		`SELECT id, tenant_id, user_id, job_type, adapter, status, priority, target_json, input_json, policy_json,
 		        last_cursor_json, created_at, updated_at
 		 FROM automation_job
 		 WHERE id = ?`,
@@ -72,6 +77,10 @@ func (repo *MySQLRepository) Job(jobID string) (automationmodel.Job, error) {
 func (repo *MySQLRepository) ListJobs(opts automationmodel.ListJobsOptions) ([]automationmodel.Job, error) {
 	where := []string{"1 = 1"}
 	args := make([]any, 0)
+	if opts.TenantID != "" {
+		where = append(where, "tenant_id = ?")
+		args = append(args, opts.TenantID)
+	}
 	if opts.Status != "" {
 		where = append(where, "status = ?")
 		args = append(args, opts.Status)
@@ -83,7 +92,7 @@ func (repo *MySQLRepository) ListJobs(opts automationmodel.ListJobsOptions) ([]a
 	args = append(args, opts.Limit, opts.Offset)
 	rows, err := repo.db.QueryContext(
 		context.Background(),
-		`SELECT id, job_type, adapter, status, priority, target_json, input_json, policy_json,
+		`SELECT id, tenant_id, user_id, job_type, adapter, status, priority, target_json, input_json, policy_json,
 		        last_cursor_json, created_at, updated_at
 		 FROM automation_job
 		 WHERE `+strings.Join(where, " AND ")+`
@@ -116,12 +125,13 @@ func (repo *MySQLRepository) NextJob(device workermodel.Device) (automationmodel
 
 	rows, err := tx.QueryContext(
 		context.Background(),
-		`SELECT id, job_type, adapter, target_json, input_json, policy_json, last_cursor_json
+		`SELECT id, tenant_id, user_id, job_type, adapter, target_json, input_json, policy_json, last_cursor_json
 		 FROM automation_job
-		 WHERE status = 'queued'
+		 WHERE tenant_id = ? AND status = 'queued'
 		 ORDER BY priority DESC, created_at ASC
 		 LIMIT 20
 		 FOR UPDATE`,
+		device.TenantID,
 	)
 	if err != nil {
 		return automationmodel.JobEnvelope{}, err
@@ -133,8 +143,11 @@ func (repo *MySQLRepository) NextJob(device workermodel.Device) (automationmodel
 		var envelope automationmodel.JobEnvelope
 		var targetRaw, inputRaw, policyRaw []byte
 		var cursorRaw sql.NullString
+		var userID sql.NullString
 		if err := rows.Scan(
 			&envelope.JobID,
+			&envelope.TenantID,
+			&userID,
 			&envelope.JobType,
 			&envelope.Adapter,
 			&targetRaw,
@@ -144,6 +157,7 @@ func (repo *MySQLRepository) NextJob(device workermodel.Device) (automationmodel
 		); err != nil {
 			return automationmodel.JobEnvelope{}, err
 		}
+		envelope.UserID = userID.String
 		if !adapterAllowed(envelope.Adapter, device.Capabilities) {
 			continue
 		}
@@ -169,10 +183,12 @@ func (repo *MySQLRepository) NextJob(device workermodel.Device) (automationmodel
 	_, err = tx.ExecContext(
 		context.Background(),
 		`INSERT INTO automation_run (
-			id, job_id, device_id, adapter, status, worker_version, capabilities_json, started_at
-		) VALUES (?, ?, ?, ?, 'running', ?, ?, ?)`,
+			id, job_id, tenant_id, user_id, device_id, adapter, status, worker_version, capabilities_json, started_at
+		) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)`,
 		runID,
 		selected.JobID,
+		selected.TenantID,
+		selected.UserID,
 		device.ID,
 		selected.Adapter,
 		device.WorkerVersion,
@@ -206,7 +222,7 @@ func (repo *MySQLRepository) NextJob(device workermodel.Device) (automationmodel
 func (repo *MySQLRepository) Run(runID string) (automationmodel.Run, error) {
 	row := repo.db.QueryRowContext(
 		context.Background(),
-		`SELECT id, job_id, device_id, status, started_at, last_heartbeat_at, ended_at,
+		`SELECT id, job_id, tenant_id, user_id, device_id, status, started_at, last_heartbeat_at, ended_at,
 		        summary_json, error_code, error_message
 		 FROM automation_run
 		 WHERE id = ?`,
@@ -218,6 +234,10 @@ func (repo *MySQLRepository) Run(runID string) (automationmodel.Run, error) {
 func (repo *MySQLRepository) ListRuns(opts automationmodel.ListRunsOptions) ([]automationmodel.Run, error) {
 	where := []string{"1 = 1"}
 	args := make([]any, 0)
+	if opts.TenantID != "" {
+		where = append(where, "tenant_id = ?")
+		args = append(args, opts.TenantID)
+	}
 	if opts.Status != "" {
 		where = append(where, "status = ?")
 		args = append(args, opts.Status)
@@ -233,7 +253,7 @@ func (repo *MySQLRepository) ListRuns(opts automationmodel.ListRunsOptions) ([]a
 	args = append(args, opts.Limit, opts.Offset)
 	rows, err := repo.db.QueryContext(
 		context.Background(),
-		`SELECT id, job_id, device_id, status, started_at, last_heartbeat_at, ended_at,
+		`SELECT id, job_id, tenant_id, user_id, device_id, status, started_at, last_heartbeat_at, ended_at,
 		        summary_json, error_code, error_message
 		 FROM automation_run
 		 WHERE `+strings.Join(where, " AND ")+`
@@ -306,11 +326,12 @@ func (repo *MySQLRepository) Checkpoint(runID string, checkpoint automationmodel
 	_, err = repo.db.ExecContext(
 		context.Background(),
 		`INSERT INTO automation_checkpoint (
-			id, job_id, run_id, sequence, stage, cursor_json, progress_json, result_json, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, JSON_OBJECT(), ?, ?)`,
+			id, job_id, run_id, tenant_id, sequence, stage, cursor_json, progress_json, result_json, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, JSON_OBJECT(), ?, ?)`,
 		stored.ID,
 		stored.JobID,
 		stored.RunID,
+		run.TenantID,
 		sequence,
 		stored.Status,
 		mustJSON(stored.Cursor),
@@ -369,12 +390,13 @@ func (repo *MySQLRepository) CreateArtifact(runID string, artifact automationmod
 	_, err = repo.db.ExecContext(
 		context.Background(),
 		`INSERT INTO automation_artifact (
-			id, job_id, run_id, artifact_type, storage_key, filename, content_type,
+			id, job_id, run_id, tenant_id, artifact_type, storage_key, filename, content_type,
 			size_bytes, sha256, metadata_json, redaction_status, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_required', ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_required', ?)`,
 		artifact.ID,
 		run.JobID,
 		runID,
+		run.TenantID,
 		artifact.ArtifactType,
 		artifact.LocalPath,
 		"",
@@ -384,13 +406,14 @@ func (repo *MySQLRepository) CreateArtifact(runID string, artifact automationmod
 		mustJSON(mapOrEmpty(artifact.Metadata)),
 		artifact.CreatedAt,
 	)
+	artifact.TenantID = run.TenantID
 	return artifact, err
 }
 
 func (repo *MySQLRepository) Artifacts(runID string) ([]automationmodel.Artifact, error) {
 	rows, err := repo.db.QueryContext(
 		context.Background(),
-		`SELECT id, run_id, artifact_type, storage_key, size_bytes, sha256, metadata_json, created_at
+		`SELECT id, run_id, tenant_id, artifact_type, storage_key, size_bytes, sha256, metadata_json, created_at
 		 FROM automation_artifact
 		 WHERE run_id = ?
 		 ORDER BY created_at ASC`,
@@ -410,6 +433,7 @@ func (repo *MySQLRepository) Artifacts(runID string) ([]automationmodel.Artifact
 		if err := rows.Scan(
 			&artifact.ID,
 			&artifact.RunID,
+			&artifact.TenantID,
 			&artifact.ArtifactType,
 			&localPath,
 			&size,
@@ -433,7 +457,7 @@ func (repo *MySQLRepository) Artifacts(runID string) ([]automationmodel.Artifact
 func (repo *MySQLRepository) Artifact(artifactID string) (automationmodel.Artifact, error) {
 	row := repo.db.QueryRowContext(
 		context.Background(),
-		`SELECT id, run_id, artifact_type, storage_key, size_bytes, sha256, metadata_json, created_at
+		`SELECT id, run_id, tenant_id, artifact_type, storage_key, size_bytes, sha256, metadata_json, created_at
 		 FROM automation_artifact
 		 WHERE id = ?`,
 		artifactID,
@@ -452,16 +476,18 @@ func (repo *MySQLRepository) CreateManualAction(runID string, action automationm
 	}
 	action.ID = mysqlNewID("act")
 	action.RunID = runID
+	action.TenantID = run.TenantID
 	action.Status = "pending"
 	action.CreatedAt = time.Now().UTC()
 	_, err = repo.db.ExecContext(
 		context.Background(),
 		`INSERT INTO automation_manual_action (
-			id, job_id, run_id, type, status, prompt, details_json, created_at
-		) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`,
+			id, job_id, run_id, tenant_id, type, status, prompt, details_json, created_at
+		) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
 		action.ID,
 		run.JobID,
 		runID,
+		action.TenantID,
 		action.ActionType,
 		action.Message,
 		mustJSON(mapOrEmpty(action.Payload)),
@@ -473,7 +499,7 @@ func (repo *MySQLRepository) CreateManualAction(runID string, action automationm
 func (repo *MySQLRepository) ManualActions(runID string) ([]automationmodel.ManualAction, error) {
 	rows, err := repo.db.QueryContext(
 		context.Background(),
-		`SELECT id, run_id, type, status, prompt, details_json, created_at, resolved_at
+		`SELECT id, run_id, tenant_id, type, status, prompt, details_json, created_at, resolved_at
 		 FROM automation_manual_action
 		 WHERE run_id = ?
 		 ORDER BY created_at ASC`,
@@ -497,6 +523,10 @@ func (repo *MySQLRepository) ManualActions(runID string) ([]automationmodel.Manu
 func (repo *MySQLRepository) ListManualActions(opts automationmodel.ListManualActionsOptions) ([]automationmodel.ManualAction, error) {
 	where := []string{"1 = 1"}
 	args := make([]any, 0)
+	if opts.TenantID != "" {
+		where = append(where, "tenant_id = ?")
+		args = append(args, opts.TenantID)
+	}
 	if opts.Status != "" {
 		where = append(where, "status = ?")
 		args = append(args, opts.Status)
@@ -508,7 +538,7 @@ func (repo *MySQLRepository) ListManualActions(opts automationmodel.ListManualAc
 	args = append(args, opts.Limit, opts.Offset)
 	rows, err := repo.db.QueryContext(
 		context.Background(),
-		`SELECT id, run_id, type, status, prompt, details_json, created_at, resolved_at
+		`SELECT id, run_id, tenant_id, type, status, prompt, details_json, created_at, resolved_at
 		 FROM automation_manual_action
 		 WHERE `+strings.Join(where, " AND ")+`
 		 ORDER BY created_at DESC
@@ -534,7 +564,7 @@ func (repo *MySQLRepository) ListManualActions(opts automationmodel.ListManualAc
 func (repo *MySQLRepository) ManualAction(actionID string) (automationmodel.ManualAction, error) {
 	row := repo.db.QueryRowContext(
 		context.Background(),
-		`SELECT id, run_id, type, status, prompt, details_json, created_at, resolved_at
+		`SELECT id, run_id, tenant_id, type, status, prompt, details_json, created_at, resolved_at
 		 FROM automation_manual_action
 		 WHERE id = ?`,
 		actionID,
@@ -654,8 +684,11 @@ func scanJob(row scanner) (automationmodel.Job, error) {
 	var job automationmodel.Job
 	var targetRaw, inputRaw, policyRaw []byte
 	var cursorRaw sql.NullString
+	var userID sql.NullString
 	err := row.Scan(
 		&job.ID,
+		&job.TenantID,
+		&userID,
 		&job.Type,
 		&job.Adapter,
 		&job.Status,
@@ -673,6 +706,7 @@ func scanJob(row scanner) (automationmodel.Job, error) {
 	if err != nil {
 		return automationmodel.Job{}, err
 	}
+	job.UserID = userID.String
 	job.Target = decodeMap(targetRaw)
 	job.Input = decodeMap(inputRaw)
 	job.Policy = decodeMap(policyRaw)
@@ -682,6 +716,7 @@ func scanJob(row scanner) (automationmodel.Job, error) {
 
 func scanRun(row scanner) (automationmodel.Run, error) {
 	var run automationmodel.Run
+	var userID sql.NullString
 	var summaryRaw sql.NullString
 	var errorCode sql.NullString
 	var errorMessage sql.NullString
@@ -690,6 +725,8 @@ func scanRun(row scanner) (automationmodel.Run, error) {
 	err := row.Scan(
 		&run.ID,
 		&run.JobID,
+		&run.TenantID,
+		&userID,
 		&run.DeviceID,
 		&run.Status,
 		&run.StartedAt,
@@ -705,6 +742,7 @@ func scanRun(row scanner) (automationmodel.Run, error) {
 	if err != nil {
 		return automationmodel.Run{}, err
 	}
+	run.UserID = userID.String
 	if lastHeartbeat.Valid {
 		run.LastHeartbeatAt = &lastHeartbeat.Time
 	}
@@ -727,6 +765,7 @@ func scanArtifact(row scanner) (automationmodel.Artifact, error) {
 	err := row.Scan(
 		&artifact.ID,
 		&artifact.RunID,
+		&artifact.TenantID,
 		&artifact.ArtifactType,
 		&localPath,
 		&size,
@@ -753,6 +792,7 @@ func scanManualAction(row scanner) (automationmodel.ManualAction, error) {
 	err := row.Scan(
 		&action.ID,
 		&action.RunID,
+		&action.TenantID,
 		&action.ActionType,
 		&action.Status,
 		&action.Message,

@@ -5,8 +5,11 @@
 //   - /api/v1/users/*     → API Service     (用户域)
 //   - /api/v1/files/*     → API Service     (文件域)
 //   - /api/v1/ai/*        → AI Engine       (AI 服务)
+//   - /web/*              → API Service     (客户 Automation API)
 //   - /admin/*            → API Service     (管理后台 API)
-//   - /internal/*         → API Service     (内部 worker)
+//   - /worker/*           → API Service     (本机 Worker API，下游校验 device token)
+//
+// /internal/* 不注册到公网 Gateway；内部服务应通过私网直接访问 API。
 package router
 
 import (
@@ -45,7 +48,8 @@ func SetupRoutes(r *gin.Engine, cfg *config.Config) {
 		r.Group("/api/v1/"+d).Any("/*path", proxy.ForwardRequest(ai, secret))
 	}
 
-	// ─── Admin & Internal（下游自行校验）───
+	// ─── Browser Agent Automation ───
+	r.Group("/web").Any("/*path", proxy.ForwardRequest(api, secret))
 	r.Group("/admin").Any("/*path", proxy.ForwardRequest(api, secret))
-	r.Group("/internal").Any("/*path", proxy.ForwardRequest(api, secret))
+	r.Group("/worker").Any("/*path", proxy.ForwardRequest(api, secret))
 }

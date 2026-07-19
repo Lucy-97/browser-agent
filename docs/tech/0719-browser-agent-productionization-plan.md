@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-19：同步 Phase 1 首批实现：新增租户 schema/migration、Automation/Worker resource ownership、可信 Gateway 身份头、严格配对批准与双租户越权测试；真实账号登录和 membership 校验尚未完成。
 - 2026-07-19：首次建立线上客户交付与生产化技术基线，确定“云端控制面 + 客户本机 Worker”的首期形态，并拆分账号租户、部署、数据安全、Worker 交付、可观测性和发布门禁。
 
 ## 1. 文档信息
@@ -78,9 +79,9 @@ flowchart LR
 
 | 领域 | 当前基线 | 线上缺口 |
 | --- | --- | --- |
-| 身份与权限 | `/admin/*`、`/web/*` 支持可选共享 token | 没有已接入 Automation API 的用户登录、租户、RBAC 和 resource ownership |
-| Worker 身份 | 有设备配对、device token、心跳和 revoke | 配对未与已登录用户/租户形成完整 ownership，缺少客户化安装和升级 |
-| API 入口 | Go API 可本地访问；Gateway 有 JWT/限流骨架 | Gateway 未完整代理当前 `/web/*`、`/worker/*` 链路，生产域名和信任头边界未打通 |
+| 身份与权限 | 已有 tenant/membership schema、最小角色集、可信 actor 和 Automation/Worker resource ownership | 缺真实登录/注册、membership 状态校验、JWT 签发与成员管理流程 |
+| Worker 身份 | 严格模式下配对必须由 tenant owner/platform admin 批准，device token、心跳、租户一致性和 revoke 已接通 | 缺登录后的 Web 配对 UI、客户化安装、安全凭据存储和升级 |
+| API 入口 | Gateway 已代理 `/web/*`、`/admin/*`、`/worker/*`，清除外部身份头并从 JWT 注入租户 actor；`/internal/*` 不对公网注册 | 缺真实身份提供方/会话签发、生产域名、TLS/WAF 和 staging 部署验收 |
 | 部署 | 有本地 Compose、生产 Compose 草案和 K3s 骨架 | 默认凭据、端口暴露、健康检查、变量、镜像版本和服务清单未形成可验收发布物 |
 | Artifact | API 支持上传、记录和下载，本地有请求大小上限 | 主要依赖本地文件路径，缺对象存储、租户级授权、留存、删除、扫描和容量配额 |
 | 数据 | MySQL schema 和 migration 已存在，Redis 用于 claim lock | 缺自动 migration job、托管备份、恢复演练、连接和容量告警 |
@@ -88,7 +89,7 @@ flowchart LR
 | 可观测性 | 有健康检查、Worker 心跳、run 状态和日志 | 缺集中日志、核心指标、告警、前端错误采集和线上 trace 关联 |
 | CI/CD | Go 与前端已有基础构建测试 | Worker 未纳入完整 CI，缺镜像构建/扫描/推送、staging、部署、回滚和线上 E2E |
 
-数据库中的部分 `user_id` 字段目前仍为可空兼容字段，业务代码未形成强制的租户查询边界。生产化不能只给现有记录补字段，必须在 handler、engine、repository 和下载链路上同时强制 ownership。
+数据库中的部分 `user_id` 字段仍为兼容旧数据的可空字段；`tenant_id` 已通过基线和幂等 migration 加入 Worker/Automation 资源，并在 handler、repository、Worker 领任务/回写和 artifact 下载链路强制 ownership。下一步仍需将真实账号与 active membership 接入 JWT 签发，不能把“已有可信 actor 接口”视为完整账号系统。
 
 ## 5. 详细技术设计
 
@@ -290,11 +291,11 @@ tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
 
 ### Phase 1：身份与租户隔离（上线阻断）
 
-- [ ] 实现用户、租户、membership 和 RBAC。
-- [ ] 为设备及 `automation_*` 资源增加强制 ownership。
-- [ ] 所有列表、详情、下载、取消和人工动作接口增加租户授权测试。
-- [ ] Worker 配对绑定登录用户和租户，支持立即 revoke。
-- [ ] 将客户接口接入 Gateway 的真实鉴权链路。
+- [ ] 实现用户、租户、membership 和 RBAC（tenant/membership schema、角色和 actor 已完成；真实账号与 membership 校验待完成）。
+- [x] 为设备及 `automation_*` 资源增加强制 ownership。
+- [x] 列表、详情、下载、取消、人工动作、Worker 回写和设备操作已增加双租户授权测试。
+- [ ] Worker 配对绑定登录用户和租户，支持立即 revoke（严格配对批准和 revoke API 已完成；登录 UI 待完成）。
+- [ ] 将客户接口接入 Gateway 的真实鉴权链路（路由、身份头清理/注入和 API 信任校验已完成；真实 JWT 签发与部署待完成）。
 
 **验收门禁**：使用两个测试租户执行自动化越权测试，任何跨租户读取、写入、下载或设备操作均返回拒绝。
 
@@ -342,7 +343,7 @@ tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
 
 - [ ] 生产环境不存在默认密码、空鉴权 token 或 insecure file secret。
 - [ ] 客户和 Admin 使用独立身份与权限模型。
-- [ ] 所有资源接口都有 ownership 测试。
+- [x] Worker/Automation 核心资源接口已有双租户 ownership 测试。
 - [ ] Worker 配对码一次性、短时有效并绑定租户。
 - [ ] Secret 可轮换，日志和 artifact 不包含凭据明文。
 

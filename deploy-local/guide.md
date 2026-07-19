@@ -146,9 +146,14 @@ http://localhost:24001
 INTERNAL_SECRET=local-dev-internal-secret
 ADMIN_API_TOKEN=
 WEB_API_TOKEN=
+DEFAULT_TENANT_ID=tenant_local
+DEFAULT_USER_ID=user_local
+REQUIRE_TENANT_IDENTITY=false
 ```
 
 `ADMIN_API_TOKEN` 或 `WEB_API_TOKEN` 为空时，对应接口保持本地开发免 token；配置后，`/admin/*` 需要 `X-Admin-Token` 或 `Authorization: Bearer ...`，`/web/*` 需要 `X-Web-Token` 或 `Authorization: Bearer ...`。Admin dev server 会从本地环境文件注入 `VITE_ADMIN_API_TOKEN`；浏览器端可通过 localStorage 设置 `browser-agent.adminToken` 或 `browser-agent.webToken`。
+
+`REQUIRE_TENANT_IDENTITY=false` 只用于本地单租户开发：API 会使用 `DEFAULT_TENANT_ID` / `DEFAULT_USER_ID`，并自动批准本机 Worker 配对。staging/production 必须设置为 `true`；此时 `/web/*` 与 `/admin/*` 只接受 Gateway 注入并由 `X-Internal-Secret` 保护的 `X-Tenant-ID`、`X-User-UUID`、`X-Tenant-Role`，Worker 配对也必须由 `tenant_owner` 或 `platform_admin` 批准。Gateway 的 `INTERNAL_API_SECRET` 必须与 API 的 `INTERNAL_SECRET` 来自同一个 Secret Manager 条目，API 端口不得直接暴露公网。
 
 Worker：
 

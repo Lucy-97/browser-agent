@@ -8,6 +8,7 @@ import (
 
 	workerengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/worker"
 	basehandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/identity"
 	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
 	workerrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/worker"
 )
@@ -23,6 +24,9 @@ func New(engine *workerengine.Engine) *Handler {
 func (handler *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/worker/devices", handler.listDevices)
 	mux.HandleFunc("POST /admin/worker/devices/{device_id}/revoke", handler.revokeDevice)
+	mux.HandleFunc("GET /web/worker/devices", handler.listDevices)
+	mux.HandleFunc("POST /web/worker/devices/{device_id}/revoke", handler.revokeDevice)
+	mux.HandleFunc("POST /web/worker/pairings/{pairing_code}/approve", handler.approvePairing)
 	mux.HandleFunc("POST /worker/devices/pairing", handler.createPairing)
 	mux.HandleFunc("GET /worker/devices/pairing/{pairing_id}", handler.getPairing)
 	mux.HandleFunc("POST /worker/devices/{device_id}/heartbeat", handler.heartbeat)
@@ -47,11 +51,17 @@ func (handler *Handler) createPairing(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
+	actor, ok := identity.FromRequest(r)
+	if !ok {
+		basehandler.WriteError(w, http.StatusUnauthorized, "TENANT_IDENTITY_REQUIRED", "authenticated tenant identity is required", false)
+		return
+	}
 	limit, offset := limitOffset(r)
 	devices, err := handler.engine.ListDevices(workermodel.ListDevicesOptions{
-		Status: r.URL.Query().Get("status"),
-		Limit:  limit,
-		Offset: offset,
+		TenantID: actor.TenantID,
+		Status:   r.URL.Query().Get("status"),
+		Limit:    limit,
+		Offset:   offset,
 	})
 	if err != nil {
 		status, code := mapWorkerError(err)
@@ -62,13 +72,45 @@ func (handler *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) revokeDevice(w http.ResponseWriter, r *http.Request) {
-	device, err := handler.engine.RevokeDevice(r.PathValue("device_id"))
+	actor, ok := identity.FromRequest(r)
+	if !ok {
+		basehandler.WriteError(w, http.StatusUnauthorized, "TENANT_IDENTITY_REQUIRED", "authenticated tenant identity is required", false)
+		return
+	}
+	if !actor.CanManageDevices() {
+		basehandler.WriteError(w, http.StatusForbidden, "TENANT_OWNER_REQUIRED", "tenant owner role is required", false)
+		return
+	}
+	device, err := handler.engine.RevokeDevice(actor.TenantID, r.PathValue("device_id"))
 	if err != nil {
 		status, code := mapWorkerError(err)
 		basehandler.WriteError(w, status, code, err.Error(), false)
 		return
 	}
 	basehandler.WriteJSON(w, http.StatusOK, device)
+}
+
+func (handler *Handler) approvePairing(w http.ResponseWriter, r *http.Request) {
+	actor, ok := identity.FromRequest(r)
+	if !ok {
+		basehandler.WriteError(w, http.StatusUnauthorized, "TENANT_IDENTITY_REQUIRED", "authenticated tenant identity is required", false)
+		return
+	}
+	if !actor.CanManageDevices() {
+		basehandler.WriteError(w, http.StatusForbidden, "TENANT_OWNER_REQUIRED", "tenant owner role is required", false)
+		return
+	}
+	pairingCode := strings.TrimSpace(r.PathValue("pairing_code"))
+	if pairingCode == "" {
+		basehandler.WriteError(w, http.StatusBadRequest, "PAIRING_CODE_REQUIRED", "pairing code is required", false)
+		return
+	}
+	if err := handler.engine.ApprovePairing(pairingCode, actor.TenantID, actor.UserID); err != nil {
+		status, code := mapWorkerError(err)
+		basehandler.WriteError(w, status, code, err.Error(), false)
+		return
+	}
+	basehandler.WriteJSON(w, http.StatusOK, map[string]any{"status": "approved"})
 }
 
 func (handler *Handler) getPairing(w http.ResponseWriter, r *http.Request) {

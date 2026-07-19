@@ -55,6 +55,26 @@ func (repo *MemoryRepository) CreatePairing(req workermodel.PairingRequest) work
 	return pairing
 }
 
+func (repo *MemoryRepository) ApprovePairing(pairingCode string, tenantID string, userID string) error {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+
+	for _, pairing := range repo.pairings {
+		if pairing.Code != pairingCode {
+			continue
+		}
+		if pairing.Status != "pending" || time.Now().UTC().After(pairing.ExpiresAt) {
+			pairing.Status = "expired"
+			return ErrPairingNotFound
+		}
+		pairing.TenantID = tenantID
+		pairing.ApprovedByUserID = userID
+		pairing.Status = "approved"
+		return nil
+	}
+	return ErrPairingNotFound
+}
+
 func pairingVerificationURI() string {
 	baseURL := strings.TrimRight(os.Getenv("PUBLIC_WEB_BASE_URL"), "/")
 	if baseURL == "" {
@@ -71,7 +91,10 @@ func (repo *MemoryRepository) GetPairing(pairingID string) (workermodel.Pairing,
 	if !ok {
 		return workermodel.Pairing{}, ErrPairingNotFound
 	}
-	if pairing.Status == "pending" {
+	if pairing.Status == "pending" && time.Now().UTC().After(pairing.ExpiresAt) {
+		pairing.Status = "expired"
+	}
+	if pairing.Status == "approved" && pairing.Device == nil {
 		deviceID := newID("wdev")
 		token := newID("wdt")
 		name := pairing.DisplayName
@@ -80,6 +103,8 @@ func (repo *MemoryRepository) GetPairing(pairingID string) (workermodel.Pairing,
 		}
 		device := workermodel.Device{
 			ID:            deviceID,
+			TenantID:      pairing.TenantID,
+			UserID:        pairing.ApprovedByUserID,
 			Name:          name,
 			Platform:      pairing.Platform,
 			WorkerVersion: pairing.WorkerVersion,
@@ -89,7 +114,6 @@ func (repo *MemoryRepository) GetPairing(pairingID string) (workermodel.Pairing,
 		}
 		repo.devices[device.ID] = &device
 		repo.devicesByToken[token] = device.ID
-		pairing.Status = "approved"
 		pairing.DeviceID = device.ID
 		pairing.Device = &device
 		pairing.DeviceToken = token
@@ -118,6 +142,9 @@ func (repo *MemoryRepository) ListDevices(opts workermodel.ListDevicesOptions) (
 
 	devices := make([]workermodel.Device, 0, len(repo.devices))
 	for _, device := range repo.devices {
+		if opts.TenantID != "" && device.TenantID != opts.TenantID {
+			continue
+		}
 		if opts.Status != "" && device.Status != opts.Status {
 			continue
 		}
@@ -164,12 +191,12 @@ func (repo *MemoryRepository) Heartbeat(deviceID string, req workermodel.Heartbe
 	return *device, nil
 }
 
-func (repo *MemoryRepository) RevokeDevice(deviceID string) (workermodel.Device, error) {
+func (repo *MemoryRepository) RevokeDevice(tenantID string, deviceID string) (workermodel.Device, error) {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
 	device, ok := repo.devices[deviceID]
-	if !ok {
+	if !ok || (tenantID != "" && device.TenantID != tenantID) {
 		return workermodel.Device{}, ErrDeviceNotFound
 	}
 	device.Status = "revoked"

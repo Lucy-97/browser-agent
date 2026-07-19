@@ -22,7 +22,9 @@ import (
 	automationengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/automation"
 	basehandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler"
 	workerhandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler/worker"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/identity"
 	automationmodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/automation"
+	workermodel "github.com/Lucy-97/browser-agent/backend-api/internal/model/worker"
 	automationrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/automation"
 )
 
@@ -78,6 +80,9 @@ func (handler *Handler) Register(mux *http.ServeMux) {
 }
 
 func (handler *Handler) webArtifacts(w http.ResponseWriter, r *http.Request) {
+	if _, ok := handler.tenantRun(w, r, r.PathValue("run_id")); !ok {
+		return
+	}
 	artifacts, err := handler.engine.Artifacts(r.PathValue("run_id"))
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -88,14 +93,19 @@ func (handler *Handler) webArtifacts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) webCopyrightEvidenceReport(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requestActor(w, r)
+	if !ok {
+		return
+	}
 	limit, offset := limitOffset(r)
 	adapter := strings.TrimSpace(r.URL.Query().Get("adapter"))
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 
 	runs, err := handler.engine.ListRuns(automationmodel.ListRunsOptions{
-		Status: status,
-		Limit:  limit,
-		Offset: offset,
+		TenantID: actor.TenantID,
+		Status:   status,
+		Limit:    limit,
+		Offset:   offset,
 	})
 	if err != nil {
 		statusCode, code := mapAutomationError(err)
@@ -113,7 +123,7 @@ func (handler *Handler) webCopyrightEvidenceReport(w http.ResponseWriter, r *htt
 			}
 		}
 		job, err := handler.engine.Job(run.JobID)
-		if err != nil {
+		if err != nil || job.TenantID != actor.TenantID {
 			continue
 		}
 		query, _ := job.Input["query"].(string)
@@ -400,16 +410,25 @@ func (handler *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 		basehandler.WriteError(w, http.StatusBadRequest, "INVALID_JOB", "job_type and adapter are required", false)
 		return
 	}
-	basehandler.WriteJSON(w, http.StatusCreated, handler.engine.CreateJob(req))
+	job, ok := handler.createOwnedJob(w, r, req)
+	if !ok {
+		return
+	}
+	basehandler.WriteJSON(w, http.StatusCreated, job)
 }
 
 func (handler *Handler) listJobs(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requestActor(w, r)
+	if !ok {
+		return
+	}
 	limit, offset := limitOffset(r)
 	jobs, err := handler.engine.ListJobs(automationmodel.ListJobsOptions{
-		Status:  r.URL.Query().Get("status"),
-		Adapter: r.URL.Query().Get("adapter"),
-		Limit:   limit,
-		Offset:  offset,
+		TenantID: actor.TenantID,
+		Status:   r.URL.Query().Get("status"),
+		Adapter:  r.URL.Query().Get("adapter"),
+		Limit:    limit,
+		Offset:   offset,
 	})
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -420,12 +439,17 @@ func (handler *Handler) listJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) listWebJobs(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requestActor(w, r)
+	if !ok {
+		return
+	}
 	limit, offset := limitOffset(r)
 	jobs, err := handler.engine.ListJobs(automationmodel.ListJobsOptions{
-		Status:  r.URL.Query().Get("status"),
-		Adapter: r.URL.Query().Get("adapter"),
-		Limit:   limit,
-		Offset:  offset,
+		TenantID: actor.TenantID,
+		Status:   r.URL.Query().Get("status"),
+		Adapter:  r.URL.Query().Get("adapter"),
+		Limit:    limit,
+		Offset:   offset,
 	})
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -436,12 +460,17 @@ func (handler *Handler) listWebJobs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) listWebRuns(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requestActor(w, r)
+	if !ok {
+		return
+	}
 	jobID := r.PathValue("job_id")
 	limit, offset := limitOffset(r)
 	runs, err := handler.engine.ListRuns(automationmodel.ListRunsOptions{
-		JobID:  jobID,
-		Limit:  limit,
-		Offset: offset,
+		TenantID: actor.TenantID,
+		JobID:    jobID,
+		Limit:    limit,
+		Offset:   offset,
 	})
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -510,7 +539,7 @@ func (handler *Handler) createWebSocialUploadJob(w http.ResponseWriter, r *http.
 	}
 	manualPublishRequired := false
 
-	job := handler.engine.CreateJob(automationmodel.CreateJobRequest{
+	job, created := handler.createOwnedJob(w, r, automationmodel.CreateJobRequest{
 		JobType: config.jobType,
 		Adapter: config.adapter,
 		Target: map[string]any{
@@ -533,6 +562,9 @@ func (handler *Handler) createWebSocialUploadJob(w http.ResponseWriter, r *http.
 		},
 		Priority: int(time.Now().Unix()),
 	})
+	if !created {
+		return
+	}
 	basehandler.WriteJSON(w, http.StatusCreated, job)
 }
 
@@ -574,7 +606,7 @@ func (handler *Handler) createWebWeixinDesktopSyncJob(w http.ResponseWriter, r *
 		maxFileBytes = 1024 * 1024 * 1024
 	}
 
-	job := handler.engine.CreateJob(automationmodel.CreateJobRequest{
+	job, created := handler.createOwnedJob(w, r, automationmodel.CreateJobRequest{
 		JobType: "weixin.desktop_sync",
 		Adapter: "weixin.desktop_sync",
 		Target: map[string]any{
@@ -595,6 +627,9 @@ func (handler *Handler) createWebWeixinDesktopSyncJob(w http.ResponseWriter, r *
 		},
 		Priority: int(time.Now().Unix()),
 	})
+	if !created {
+		return
+	}
 	basehandler.WriteJSON(w, http.StatusCreated, job)
 }
 
@@ -742,7 +777,7 @@ func (handler *Handler) createBrowserJob(w http.ResponseWriter, r *http.Request,
 			input["result_selector"] = value
 		}
 	}
-	job := handler.engine.CreateJob(automationmodel.CreateJobRequest{
+	job, created := handler.createOwnedJob(w, r, automationmodel.CreateJobRequest{
 		JobType: cfg.jobType,
 		Adapter: cfg.adapter,
 		Target: map[string]any{
@@ -758,6 +793,9 @@ func (handler *Handler) createBrowserJob(w http.ResponseWriter, r *http.Request,
 		},
 		Priority: int(time.Now().Unix()),
 	})
+	if !created {
+		return
+	}
 	basehandler.WriteJSON(w, http.StatusCreated, job)
 }
 
@@ -768,12 +806,20 @@ func (handler *Handler) job(w http.ResponseWriter, r *http.Request) {
 		basehandler.WriteError(w, status, code, err.Error(), false)
 		return
 	}
+	if !requestOwnsTenant(w, r, job.TenantID) {
+		return
+	}
 	basehandler.WriteJSON(w, http.StatusOK, job)
 }
 
 func (handler *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requestActor(w, r)
+	if !ok {
+		return
+	}
 	limit, offset := limitOffset(r)
 	runs, err := handler.engine.ListRuns(automationmodel.ListRunsOptions{
+		TenantID: actor.TenantID,
 		Status:   r.URL.Query().Get("status"),
 		JobID:    r.URL.Query().Get("job_id"),
 		DeviceID: r.URL.Query().Get("device_id"),
@@ -789,16 +835,17 @@ func (handler *Handler) listRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) run(w http.ResponseWriter, r *http.Request) {
-	run, err := handler.engine.Run(r.PathValue("run_id"))
-	if err != nil {
-		status, code := mapAutomationError(err)
-		basehandler.WriteError(w, status, code, err.Error(), false)
+	run, ok := handler.tenantRun(w, r, r.PathValue("run_id"))
+	if !ok {
 		return
 	}
 	basehandler.WriteJSON(w, http.StatusOK, run)
 }
 
 func (handler *Handler) cancelRun(w http.ResponseWriter, r *http.Request) {
+	if _, ok := handler.tenantRun(w, r, r.PathValue("run_id")); !ok {
+		return
+	}
 	var req struct {
 		Reason string `json:"reason"`
 	}
@@ -820,6 +867,9 @@ func (handler *Handler) cancelRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) checkpoints(w http.ResponseWriter, r *http.Request) {
+	if _, ok := handler.tenantRun(w, r, r.PathValue("run_id")); !ok {
+		return
+	}
 	checkpoints, err := handler.engine.Checkpoints(r.PathValue("run_id"))
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -830,6 +880,9 @@ func (handler *Handler) checkpoints(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) artifacts(w http.ResponseWriter, r *http.Request) {
+	if _, ok := handler.tenantRun(w, r, r.PathValue("run_id")); !ok {
+		return
+	}
 	artifacts, err := handler.engine.Artifacts(r.PathValue("run_id"))
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -840,6 +893,9 @@ func (handler *Handler) artifacts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) trace(w http.ResponseWriter, r *http.Request) {
+	if _, ok := handler.tenantRun(w, r, r.PathValue("run_id")); !ok {
+		return
+	}
 	artifacts, err := handler.engine.Artifacts(r.PathValue("run_id"))
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -877,6 +933,9 @@ func (handler *Handler) downloadArtifact(w http.ResponseWriter, r *http.Request)
 		basehandler.WriteError(w, status, code, err.Error(), false)
 		return
 	}
+	if !requestOwnsTenant(w, r, artifact.TenantID) {
+		return
+	}
 	path, ok := handler.safeArtifactPath(artifact.LocalPath)
 	if !ok {
 		basehandler.WriteError(w, http.StatusNotFound, "ARTIFACT_FILE_NOT_FOUND", "artifact file is not available locally", false)
@@ -894,6 +953,9 @@ func (handler *Handler) downloadArtifact(w http.ResponseWriter, r *http.Request)
 }
 
 func (handler *Handler) manualActions(w http.ResponseWriter, r *http.Request) {
+	if _, ok := handler.tenantRun(w, r, r.PathValue("run_id")); !ok {
+		return
+	}
 	actions, err := handler.engine.ManualActions(r.PathValue("run_id"))
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -904,12 +966,17 @@ func (handler *Handler) manualActions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) listManualActions(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requestActor(w, r)
+	if !ok {
+		return
+	}
 	limit, offset := limitOffset(r)
 	actions, err := handler.engine.ListManualActions(automationmodel.ListManualActionsOptions{
-		Status: r.URL.Query().Get("status"),
-		RunID:  r.URL.Query().Get("run_id"),
-		Limit:  limit,
-		Offset: offset,
+		TenantID: actor.TenantID,
+		Status:   r.URL.Query().Get("status"),
+		RunID:    r.URL.Query().Get("run_id"),
+		Limit:    limit,
+		Offset:   offset,
 	})
 	if err != nil {
 		status, code := mapAutomationError(err)
@@ -920,12 +987,21 @@ func (handler *Handler) listManualActions(w http.ResponseWriter, r *http.Request
 }
 
 func (handler *Handler) resolveManualAction(w http.ResponseWriter, r *http.Request) {
+	action, err := handler.engine.ManualAction(r.PathValue("manual_action_id"))
+	if err != nil {
+		status, code := mapAutomationError(err)
+		basehandler.WriteError(w, status, code, err.Error(), false)
+		return
+	}
+	if !requestOwnsTenant(w, r, action.TenantID) {
+		return
+	}
 	var req automationmodel.ResolveManualActionRequest
 	if err := basehandler.DecodeJSON(r, &req); err != nil {
 		basehandler.WriteError(w, http.StatusBadRequest, "INVALID_JSON", err.Error(), false)
 		return
 	}
-	action, err := handler.engine.ResolveManualAction(r.PathValue("manual_action_id"), req)
+	action, err = handler.engine.ResolveManualAction(r.PathValue("manual_action_id"), req)
 	if err != nil {
 		status, code := mapAutomationError(err)
 		basehandler.WriteError(w, status, code, err.Error(), false)
@@ -954,20 +1030,15 @@ func (handler *Handler) nextJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) workerRun(w http.ResponseWriter, r *http.Request) {
-	if !handler.authorized(w, r) {
-		return
-	}
-	run, err := handler.engine.Run(r.PathValue("run_id"))
-	if err != nil {
-		status, code := mapAutomationError(err)
-		basehandler.WriteError(w, status, code, err.Error(), false)
+	_, run, ok := handler.authorizedRun(w, r, r.PathValue("run_id"))
+	if !ok {
 		return
 	}
 	basehandler.WriteJSON(w, http.StatusOK, run)
 }
 
 func (handler *Handler) heartbeat(w http.ResponseWriter, r *http.Request) {
-	if !handler.authorized(w, r) {
+	if _, _, ok := handler.authorizedRun(w, r, r.PathValue("run_id")); !ok {
 		return
 	}
 	var req automationmodel.HeartbeatRequest
@@ -985,7 +1056,7 @@ func (handler *Handler) heartbeat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) checkpoint(w http.ResponseWriter, r *http.Request) {
-	if !handler.authorized(w, r) {
+	if _, _, ok := handler.authorizedRun(w, r, r.PathValue("run_id")); !ok {
 		return
 	}
 	var checkpoint automationmodel.Checkpoint
@@ -1003,7 +1074,7 @@ func (handler *Handler) checkpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) createArtifact(w http.ResponseWriter, r *http.Request) {
-	if !handler.authorized(w, r) {
+	if _, _, ok := handler.authorizedRun(w, r, r.PathValue("run_id")); !ok {
 		return
 	}
 	var artifact automationmodel.Artifact
@@ -1021,7 +1092,7 @@ func (handler *Handler) createArtifact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (handler *Handler) uploadArtifactFile(w http.ResponseWriter, r *http.Request) {
-	if !handler.authorized(w, r) {
+	if _, _, ok := handler.authorizedRun(w, r, r.PathValue("run_id")); !ok {
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 512<<20)
@@ -1068,7 +1139,7 @@ func (handler *Handler) uploadArtifactFile(w http.ResponseWriter, r *http.Reques
 }
 
 func (handler *Handler) createManualAction(w http.ResponseWriter, r *http.Request) {
-	if !handler.authorized(w, r) {
+	if _, _, ok := handler.authorizedRun(w, r, r.PathValue("run_id")); !ok {
 		return
 	}
 	var action automationmodel.ManualAction
@@ -1086,20 +1157,20 @@ func (handler *Handler) createManualAction(w http.ResponseWriter, r *http.Reques
 }
 
 func (handler *Handler) manualAction(w http.ResponseWriter, r *http.Request) {
-	if !handler.authorized(w, r) {
-		return
-	}
 	action, err := handler.engine.ManualAction(r.PathValue("manual_action_id"))
 	if err != nil {
 		status, code := mapAutomationError(err)
 		basehandler.WriteError(w, status, code, err.Error(), false)
 		return
 	}
+	if _, _, ok := handler.authorizedRun(w, r, action.RunID); !ok {
+		return
+	}
 	basehandler.WriteJSON(w, http.StatusOK, action)
 }
 
 func (handler *Handler) completeRun(w http.ResponseWriter, r *http.Request) {
-	if !handler.authorized(w, r) {
+	if _, _, ok := handler.authorizedRun(w, r, r.PathValue("run_id")); !ok {
 		return
 	}
 	var req automationmodel.CompleteRunRequest
@@ -1117,9 +1188,68 @@ func (handler *Handler) completeRun(w http.ResponseWriter, r *http.Request) {
 	basehandler.WriteJSON(w, http.StatusOK, run)
 }
 
-func (handler *Handler) authorized(w http.ResponseWriter, r *http.Request) bool {
-	if _, ok := handler.workerAuth.AuthenticatedDevice(r); !ok {
+func (handler *Handler) authorizedRun(w http.ResponseWriter, r *http.Request, runID string) (workermodel.Device, automationmodel.Run, bool) {
+	device, ok := handler.workerAuth.AuthenticatedDevice(r)
+	if !ok {
 		basehandler.WriteError(w, http.StatusUnauthorized, "UNAUTHORIZED", "missing or invalid device token", false)
+		return workermodel.Device{}, automationmodel.Run{}, false
+	}
+	run, err := handler.engine.Run(runID)
+	if err != nil {
+		status, code := mapAutomationError(err)
+		basehandler.WriteError(w, status, code, err.Error(), false)
+		return workermodel.Device{}, automationmodel.Run{}, false
+	}
+	if run.TenantID != device.TenantID || run.DeviceID != device.ID {
+		basehandler.WriteError(w, http.StatusNotFound, "NOT_FOUND", "automation run not found", false)
+		return workermodel.Device{}, automationmodel.Run{}, false
+	}
+	return device, run, true
+}
+
+func (handler *Handler) createOwnedJob(w http.ResponseWriter, r *http.Request, req automationmodel.CreateJobRequest) (automationmodel.Job, bool) {
+	actor, ok := requestActor(w, r)
+	if !ok {
+		return automationmodel.Job{}, false
+	}
+	if !actor.CanWriteTenantResources() {
+		basehandler.WriteError(w, http.StatusForbidden, "TENANT_WRITE_FORBIDDEN", "tenant role cannot create automation jobs", false)
+		return automationmodel.Job{}, false
+	}
+	req.TenantID = actor.TenantID
+	req.UserID = actor.UserID
+	return handler.engine.CreateJob(req), true
+}
+
+func (handler *Handler) tenantRun(w http.ResponseWriter, r *http.Request, runID string) (automationmodel.Run, bool) {
+	run, err := handler.engine.Run(runID)
+	if err != nil {
+		status, code := mapAutomationError(err)
+		basehandler.WriteError(w, status, code, err.Error(), false)
+		return automationmodel.Run{}, false
+	}
+	if !requestOwnsTenant(w, r, run.TenantID) {
+		return automationmodel.Run{}, false
+	}
+	return run, true
+}
+
+func requestActor(w http.ResponseWriter, r *http.Request) (identity.Actor, bool) {
+	actor, ok := identity.FromRequest(r)
+	if !ok {
+		basehandler.WriteError(w, http.StatusUnauthorized, "TENANT_IDENTITY_REQUIRED", "authenticated tenant identity is required", false)
+		return identity.Actor{}, false
+	}
+	return actor, true
+}
+
+func requestOwnsTenant(w http.ResponseWriter, r *http.Request, tenantID string) bool {
+	actor, ok := requestActor(w, r)
+	if !ok {
+		return false
+	}
+	if tenantID == "" || tenantID != actor.TenantID {
+		basehandler.WriteError(w, http.StatusNotFound, "NOT_FOUND", "automation resource not found", false)
 		return false
 	}
 	return true

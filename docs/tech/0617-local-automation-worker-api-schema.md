@@ -8,6 +8,7 @@
 
 ## Changelog
 
+- 2026-07-19：同步生产化 Phase 1 数据与 API：增加 `tenant_id` ownership、严格配对批准、租户设备管理接口、可信 Gateway actor 和跨租户拒绝规则。
 - 2026-07-19：同步单一 Browser Agent 项目现状，移除已废弃的双分支解耦说明。
 - 2026-06-17：新增通用 Automation Worker API 与数据模型设计。将旧版文献场景 `crawl_*` 模型升级为 `automation_*` 通用模型，覆盖设备绑定、任务下发、能力声明、策略约束、checkpoint、artifact、人机协同、审计和 QIYUAN/YouTube/TikTok adapter 兼容关系。
 
@@ -185,6 +186,7 @@ human.confirmation
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | string | 设备 ID |
+| `tenant_id` | string | 强制资源归属租户 |
 | `user_id` | string | 绑定用户 |
 | `name` | string | 设备显示名 |
 | `platform` | string | `darwin-arm64`、`windows-amd64`、`linux-amd64` |
@@ -199,8 +201,9 @@ human.confirmation
 
 索引：
 
-1. `idx_worker_device_user_status(user_id, status)`
-2. `idx_worker_device_last_seen(last_seen_at)`
+1. `idx_worker_device_tenant_status(tenant_id, status)`
+2. `idx_worker_device_user_status(user_id, status)`
+3. `idx_worker_device_last_seen(last_seen_at)`
 
 ### 2. `worker_pairing`
 
@@ -209,6 +212,7 @@ human.confirmation
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | string | 配对 ID |
+| `tenant_id` | string | 批准配对时写入的租户；pending 时为空 |
 | `pairing_code_hash` | string | 配对码哈希 |
 | `status` | string | `pending|approved|expired|rejected` |
 | `device_id` | string | 批准后设备 ID |
@@ -234,6 +238,7 @@ human.confirmation
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | string | job ID |
+| `tenant_id` | string | 强制资源归属租户 |
 | `user_id` | string | 任务归属用户 |
 | `job_type` | string | 任务类型 |
 | `adapter` | string | adapter 名称 |
@@ -256,10 +261,11 @@ human.confirmation
 
 索引：
 
-1. `idx_automation_job_user_status(user_id, status)`
-2. `idx_automation_job_type_status(job_type, status)`
-3. `idx_automation_job_assigned_device(assigned_device_id, status)`
-4. `idx_automation_job_priority(status, priority, created_at)`
+1. `idx_automation_job_tenant_status(tenant_id, status)`
+2. `idx_automation_job_user_status(user_id, status)`
+3. `idx_automation_job_type_status(job_type, status)`
+4. `idx_automation_job_assigned_device(assigned_device_id, status)`
+5. `idx_automation_job_priority(status, priority, created_at)`
 
 ### 4. `automation_run`
 
@@ -269,6 +275,7 @@ human.confirmation
 | --- | --- | --- |
 | `id` | string | run ID |
 | `job_id` | string | job ID |
+| `tenant_id` | string | 从 job 冗余的强制资源归属租户 |
 | `user_id` | string | 冗余归属用户 |
 | `device_id` | string | 执行设备 |
 | `adapter` | string | 执行 adapter |
@@ -296,6 +303,7 @@ human.confirmation
 | `id` | string | checkpoint ID |
 | `job_id` | string | job ID |
 | `run_id` | string | run ID |
+| `tenant_id` | string | 从 run 冗余的强制资源归属租户 |
 | `sequence` | int | run 内递增序号 |
 | `stage` | string | 阶段名 |
 | `cursor_json` | json | 断点游标 |
@@ -317,6 +325,7 @@ human.confirmation
 | `id` | string | artifact ID |
 | `job_id` | string | job ID |
 | `run_id` | string | run ID |
+| `tenant_id` | string | 从 run 冗余的强制资源归属租户 |
 | `result_id` | string | 业务结果 ID，可为空 |
 | `artifact_type` | string | artifact 类型 |
 | `storage_key` | string | 对象存储 key 或本地存储引用 |
@@ -341,6 +350,7 @@ human.confirmation
 | `id` | string | manual action ID |
 | `job_id` | string | job ID |
 | `run_id` | string | run ID |
+| `tenant_id` | string | 从 run 冗余的强制资源归属租户 |
 | `type` | string | manual action type |
 | `status` | string | `pending|resolved|cancelled|expired` |
 | `prompt` | string | 给用户展示的说明 |
@@ -356,6 +366,7 @@ human.confirmation
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `id` | string | audit ID |
+| `tenant_id` | string | 强制资源归属租户 |
 | `job_id` | string | job ID |
 | `run_id` | string | run ID |
 | `device_id` | string | 设备 ID |
@@ -411,13 +422,9 @@ POST /worker/devices/pairing
 ```json
 {
   "worker_version": "0.1.0",
-  "platform": "darwin-arm64",
+  "platform": "windows-amd64",
   "hostname_hash": "sha256:...",
-  "capabilities": [
-    "browser.playwright.chromium",
-    "artifact.upload.multipart",
-    "adapter.generic.browser.agent"
-  ]
+  "display_name": "Customer PC"
 }
 ```
 
@@ -432,6 +439,15 @@ POST /worker/devices/pairing
 }
 ```
 
+本地单租户模式会自动批准配对。`REQUIRE_TENANT_IDENTITY=true` 时保持 `pending`，必须由已登录租户所有者批准：
+
+```http
+POST /web/worker/pairings/{pairing_code}/approve
+Authorization: Bearer <user_jwt>
+```
+
+Gateway 从 JWT 注入租户 actor，API 将 `tenant_id` 和批准用户写入 pairing/device；`tenant_viewer` 和普通 `tenant_member` 不能批准设备。
+
 ### 2. 查询配对状态
 
 ```http
@@ -445,8 +461,19 @@ GET /worker/devices/pairing/{pairing_id}
   "status": "approved",
   "device_id": "dev_123",
   "device_token": "device_token_once",
-  "refresh_token": "refresh_token_once"
+  "device": {
+    "id": "dev_123",
+    "tenant_id": "tenant_123",
+    "status": "active"
+  }
 }
+```
+
+租户所有者或平台管理员可查看并立即撤销本租户设备：
+
+```http
+GET /web/worker/devices
+POST /web/worker/devices/{device_id}/revoke
 ```
 
 ### 3. 设备心跳与能力上报
@@ -825,13 +852,15 @@ Idempotency-Key: run_123:complete
 
 ## 八、鉴权与安全
 
-1. Worker 使用 device token 调用 `/worker/*`。
-2. device token 可撤销、可轮换。
-3. 每次领取任务校验 job 用户、设备归属、设备状态和 capability。
-4. Worker 本地必须校验 `allowed_domains` 和 `allowed_actions`。
-5. 平台不接受 cookie/storage artifact，除非未来有单独的显式授权和加密设计。
-6. HTML/HAR/console log 默认按 policy 控制；社媒后台任务默认不上传完整 HTML/HAR。
-7. 所有高风险动作写 `automation_audit_event`。
+1. 客户 `/web/*` 与平台 `/admin/*` 由 Gateway 校验 JWT；Gateway 必须删除外部伪造的 `X-Tenant-ID`、`X-User-UUID`、`X-Tenant-Role` 后重新注入，并通过内部 secret 与 API 建立信任。
+2. 生产 API 必须设置 `REQUIRE_TENANT_IDENTITY=true`，且不得把 API 端口直接暴露公网；`/internal/*` 不注册到公网 Gateway。
+3. Worker 使用 device token 调用 `/worker/*`；token 可撤销、可轮换。
+4. 每次领取任务校验 job tenant、设备 tenant、设备状态和 capability；每次 run 回写还要校验 device_id 与 run 一致。
+5. 所有列表、详情、下载、取消、人工动作和设备操作必须以 actor 的 `tenant_id` 查询或执行 ownership 校验，跨租户统一返回不可见/拒绝。
+6. Worker 本地必须校验 `allowed_domains` 和 `allowed_actions`。
+7. 平台不接受 cookie/storage artifact，除非未来有单独的显式授权和加密设计。
+8. HTML/HAR/console log 默认按 policy 控制；社媒后台任务默认不上传完整 HTML/HAR。
+9. 所有高风险动作写 `automation_audit_event`。
 
 ## 九、实现优先级
 

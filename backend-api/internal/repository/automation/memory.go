@@ -49,6 +49,8 @@ func (repo *MemoryRepository) CreateJob(req automationmodel.CreateJobRequest) au
 	now := time.Now().UTC()
 	job := automationmodel.Job{
 		ID:        newID("job"),
+		TenantID:  req.TenantID,
+		UserID:    req.UserID,
 		Type:      req.JobType,
 		Adapter:   req.Adapter,
 		Target:    mapOrEmpty(req.Target),
@@ -80,6 +82,9 @@ func (repo *MemoryRepository) ListJobs(opts automationmodel.ListJobsOptions) ([]
 
 	jobs := make([]automationmodel.Job, 0, len(repo.jobs))
 	for _, job := range repo.jobs {
+		if opts.TenantID != "" && job.TenantID != opts.TenantID {
+			continue
+		}
 		if opts.Status != "" && job.Status != opts.Status {
 			continue
 		}
@@ -100,7 +105,7 @@ func (repo *MemoryRepository) NextJob(device workermodel.Device) (automationmode
 
 	jobs := make([]*automationmodel.Job, 0, len(repo.jobs))
 	for _, job := range repo.jobs {
-		if job.Status == "queued" && adapterAllowed(job.Adapter, device.Capabilities) {
+		if job.TenantID == device.TenantID && job.Status == "queued" && adapterAllowed(job.Adapter, device.Capabilities) {
 			jobs = append(jobs, job)
 		}
 	}
@@ -123,6 +128,8 @@ func (repo *MemoryRepository) NextJob(device workermodel.Device) (automationmode
 	run := automationmodel.Run{
 		ID:        newID("run"),
 		JobID:     job.ID,
+		TenantID:  job.TenantID,
+		UserID:    job.UserID,
 		DeviceID:  device.ID,
 		Status:    "running",
 		StartedAt: now,
@@ -161,6 +168,9 @@ func (repo *MemoryRepository) ListRuns(opts automationmodel.ListRunsOptions) ([]
 
 	runs := make([]automationmodel.Run, 0, len(repo.runs))
 	for _, run := range repo.runs {
+		if opts.TenantID != "" && run.TenantID != opts.TenantID {
+			continue
+		}
 		if opts.Status != "" && run.Status != opts.Status {
 			continue
 		}
@@ -233,11 +243,13 @@ func (repo *MemoryRepository) CreateArtifact(runID string, artifact automationmo
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 
-	if _, ok := repo.runs[runID]; !ok {
+	run, ok := repo.runs[runID]
+	if !ok {
 		return automationmodel.Artifact{}, ErrRunNotFound
 	}
 	artifact.ID = newID("art")
 	artifact.RunID = runID
+	artifact.TenantID = run.TenantID
 	artifact.CreatedAt = time.Now().UTC()
 	repo.artifacts[runID] = append(repo.artifacts[runID], artifact)
 	return artifact, nil
@@ -277,6 +289,7 @@ func (repo *MemoryRepository) CreateManualAction(runID string, action automation
 	}
 	action.ID = newID("act")
 	action.RunID = runID
+	action.TenantID = repo.runs[runID].TenantID
 	action.Status = "pending"
 	action.CreatedAt = time.Now().UTC()
 	repo.manualActions[action.ID] = &action
@@ -308,6 +321,9 @@ func (repo *MemoryRepository) ListManualActions(opts automationmodel.ListManualA
 
 	actions := make([]automationmodel.ManualAction, 0)
 	for _, action := range repo.manualActions {
+		if opts.TenantID != "" && action.TenantID != opts.TenantID {
+			continue
+		}
 		if opts.Status != "" && action.Status != opts.Status {
 			continue
 		}

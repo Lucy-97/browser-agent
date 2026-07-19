@@ -55,6 +55,31 @@ func (repo *MySQLRepository) CreatePairing(req workermodel.PairingRequest) worke
 	return pairing
 }
 
+func (repo *MySQLRepository) ApprovePairing(pairingCode string, tenantID string, userID string) error {
+	result, err := repo.db.ExecContext(
+		context.Background(),
+		`UPDATE worker_pairing
+		 SET tenant_id = ?, approved_by_user_id = ?, status = 'approved', approved_at = ?
+		 WHERE pairing_code_hash = ? AND status = 'pending' AND expires_at > ?`,
+		tenantID,
+		userID,
+		time.Now().UTC(),
+		tokenHash(pairingCode),
+		time.Now().UTC(),
+	)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrPairingNotFound
+	}
+	return nil
+}
+
 func (repo *MySQLRepository) GetPairing(pairingID string) (workermodel.Pairing, error) {
 	tx, err := repo.db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -69,10 +94,13 @@ func (repo *MySQLRepository) GetPairing(pairingID string) (workermodel.Pairing, 
 	var deviceName sql.NullString
 	var devicePlatform sql.NullString
 	var deviceVersion sql.NullString
+	var tenantID sql.NullString
+	var approvedByUserID sql.NullString
 	err = tx.QueryRowContext(
 		context.Background(),
 		`SELECT
-			p.id, p.status, p.device_id, p.requested_platform, p.requested_worker_version, p.expires_at,
+			p.id, p.tenant_id, p.approved_by_user_id, p.status, p.device_id,
+			p.requested_platform, p.requested_worker_version, p.expires_at,
 			d.name, d.platform, d.worker_version
 		FROM worker_pairing p
 		LEFT JOIN worker_device d ON d.id = p.device_id
@@ -81,6 +109,8 @@ func (repo *MySQLRepository) GetPairing(pairingID string) (workermodel.Pairing, 
 		pairingID,
 	).Scan(
 		&pairing.ID,
+		&tenantID,
+		&approvedByUserID,
 		&pairing.Status,
 		&deviceID,
 		&requestedPlatform,
@@ -96,11 +126,22 @@ func (repo *MySQLRepository) GetPairing(pairingID string) (workermodel.Pairing, 
 	if err != nil {
 		return workermodel.Pairing{}, err
 	}
+	pairing.TenantID = tenantID.String
+	pairing.ApprovedByUserID = approvedByUserID.String
 
-	if pairing.Status == "pending" {
+	if pairing.Status == "pending" && time.Now().UTC().After(pairing.ExpiresAt) {
+		if _, err := tx.ExecContext(context.Background(), `UPDATE worker_pairing SET status = 'expired' WHERE id = ?`, pairing.ID); err != nil {
+			return workermodel.Pairing{}, err
+		}
+		pairing.Status = "expired"
+	}
+
+	if pairing.Status == "approved" && !deviceID.Valid {
 		token := mysqlNewID("wdt")
 		device := workermodel.Device{
 			ID:            mysqlNewID("wdev"),
+			TenantID:      pairing.TenantID,
+			UserID:        pairing.ApprovedByUserID,
 			Name:          fmt.Sprintf("Worker %s", pairing.ID[len(pairing.ID)-6:]),
 			Platform:      requestedPlatform.String,
 			WorkerVersion: requestedVersion.String,
@@ -112,10 +153,12 @@ func (repo *MySQLRepository) GetPairing(pairingID string) (workermodel.Pairing, 
 		_, err = tx.ExecContext(
 			context.Background(),
 			`INSERT INTO worker_device (
-				id, name, platform, worker_version, device_token_hash, status,
+				id, tenant_id, user_id, name, platform, worker_version, device_token_hash, status,
 				capabilities_json, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, 'active', JSON_ARRAY(), ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', JSON_ARRAY(), ?, ?)`,
 			device.ID,
+			device.TenantID,
+			device.UserID,
 			device.Name,
 			device.Platform,
 			device.WorkerVersion,
@@ -145,6 +188,8 @@ func (repo *MySQLRepository) GetPairing(pairingID string) (workermodel.Pairing, 
 	} else if deviceID.Valid {
 		device := workermodel.Device{
 			ID:            deviceID.String,
+			TenantID:      pairing.TenantID,
+			UserID:        pairing.ApprovedByUserID,
 			Name:          deviceName.String,
 			Platform:      devicePlatform.String,
 			WorkerVersion: deviceVersion.String,
@@ -163,7 +208,7 @@ func (repo *MySQLRepository) GetPairing(pairingID string) (workermodel.Pairing, 
 func (repo *MySQLRepository) DeviceByToken(token string) (workermodel.Device, error) {
 	row := repo.db.QueryRowContext(
 		context.Background(),
-		`SELECT id, name, platform, worker_version, status, capabilities_json, last_seen_at
+		`SELECT id, tenant_id, user_id, name, platform, worker_version, status, capabilities_json, last_seen_at
 		 FROM worker_device
 		 WHERE device_token_hash = ?`,
 		tokenHash(token),
@@ -185,10 +230,14 @@ func (repo *MySQLRepository) ListDevices(opts workermodel.ListDevicesOptions) ([
 		where = append(where, "status = ?")
 		args = append(args, opts.Status)
 	}
+	if opts.TenantID != "" {
+		where = append(where, "tenant_id = ?")
+		args = append(args, opts.TenantID)
+	}
 	args = append(args, opts.Limit, opts.Offset)
 	rows, err := repo.db.QueryContext(
 		context.Background(),
-		`SELECT id, name, platform, worker_version, status, capabilities_json, last_seen_at
+		`SELECT id, tenant_id, user_id, name, platform, worker_version, status, capabilities_json, last_seen_at
 		 FROM worker_device
 		 WHERE `+strings.Join(where, " AND ")+`
 		 ORDER BY COALESCE(last_seen_at, updated_at) DESC
@@ -230,14 +279,15 @@ func (repo *MySQLRepository) Heartbeat(deviceID string, req workermodel.Heartbea
 		return workermodel.Device{}, err
 	}
 	var device workermodel.Device
+	var userID sql.NullString
 	var lastSeen sql.NullTime
 	err = repo.db.QueryRowContext(
 		context.Background(),
-		`SELECT id, name, platform, worker_version, status, last_seen_at
+		`SELECT id, tenant_id, user_id, name, platform, worker_version, status, last_seen_at
 		 FROM worker_device
 		 WHERE id = ?`,
 		deviceID,
-	).Scan(&device.ID, &device.Name, &device.Platform, &device.WorkerVersion, &device.Status, &lastSeen)
+	).Scan(&device.ID, &device.TenantID, &userID, &device.Name, &device.Platform, &device.WorkerVersion, &device.Status, &lastSeen)
 	if err == sql.ErrNoRows {
 		return workermodel.Device{}, ErrDeviceNotFound
 	}
@@ -247,6 +297,7 @@ func (repo *MySQLRepository) Heartbeat(deviceID string, req workermodel.Heartbea
 	if device.Status == "revoked" {
 		return workermodel.Device{}, ErrDeviceRevoked
 	}
+	device.UserID = userID.String
 	if lastSeen.Valid {
 		device.LastHeartbeat = &lastSeen.Time
 	}
@@ -255,16 +306,17 @@ func (repo *MySQLRepository) Heartbeat(deviceID string, req workermodel.Heartbea
 	return device, nil
 }
 
-func (repo *MySQLRepository) RevokeDevice(deviceID string) (workermodel.Device, error) {
+func (repo *MySQLRepository) RevokeDevice(tenantID string, deviceID string) (workermodel.Device, error) {
 	now := time.Now().UTC()
 	result, err := repo.db.ExecContext(
 		context.Background(),
 		`UPDATE worker_device
 		 SET status = 'revoked', revoked_at = ?, updated_at = ?
-		 WHERE id = ?`,
+		 WHERE id = ? AND tenant_id = ?`,
 		now,
 		now,
 		deviceID,
+		tenantID,
 	)
 	if err != nil {
 		return workermodel.Device{}, err
@@ -272,7 +324,7 @@ func (repo *MySQLRepository) RevokeDevice(deviceID string) (workermodel.Device, 
 	if affected, err := result.RowsAffected(); err == nil && affected == 0 {
 		return workermodel.Device{}, ErrDeviceNotFound
 	}
-	device, err := repo.deviceByID(deviceID)
+	device, err := repo.deviceByID(tenantID, deviceID)
 	if err != nil {
 		return workermodel.Device{}, err
 	}
@@ -280,13 +332,14 @@ func (repo *MySQLRepository) RevokeDevice(deviceID string) (workermodel.Device, 
 	return device, nil
 }
 
-func (repo *MySQLRepository) deviceByID(deviceID string) (workermodel.Device, error) {
+func (repo *MySQLRepository) deviceByID(tenantID string, deviceID string) (workermodel.Device, error) {
 	row := repo.db.QueryRowContext(
 		context.Background(),
-		`SELECT id, name, platform, worker_version, status, capabilities_json, last_seen_at
+		`SELECT id, tenant_id, user_id, name, platform, worker_version, status, capabilities_json, last_seen_at
 		 FROM worker_device
-		 WHERE id = ?`,
+		 WHERE id = ? AND tenant_id = ?`,
 		deviceID,
+		tenantID,
 	)
 	return scanDevice(row)
 }
@@ -297,10 +350,13 @@ type scanner interface {
 
 func scanDevice(row scanner) (workermodel.Device, error) {
 	var device workermodel.Device
+	var userID sql.NullString
 	var capabilitiesRaw sql.NullString
 	var lastSeen sql.NullTime
 	err := row.Scan(
 		&device.ID,
+		&device.TenantID,
+		&userID,
 		&device.Name,
 		&device.Platform,
 		&device.WorkerVersion,
@@ -314,6 +370,7 @@ func scanDevice(row scanner) (workermodel.Device, error) {
 	if err != nil {
 		return workermodel.Device{}, err
 	}
+	device.UserID = userID.String
 	if capabilitiesRaw.Valid {
 		_ = json.Unmarshal([]byte(capabilitiesRaw.String), &device.Capabilities)
 	}

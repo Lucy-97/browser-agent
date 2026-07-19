@@ -110,6 +110,8 @@ type JWTValidator interface {
 type Claims struct {
 	UserUUID    string
 	MemberLevel string
+	TenantID    string
+	TenantRole  string
 	Expired     bool // ValidateToken 内部已识别过期，给上层用于 403 判断
 }
 
@@ -124,6 +126,7 @@ type JWTOptions struct {
 // JWT 验证 Bearer token，注入 X-User-UUID / X-Member-Level 给下游。
 func JWT(validator JWTValidator, opts JWTOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		clearUntrustedIdentity(c)
 		path := c.Request.URL.Path
 		token := extractToken(c)
 
@@ -179,6 +182,19 @@ func injectIdentity(c *gin.Context, claims Claims) {
 	}
 	if claims.MemberLevel != "" {
 		c.Request.Header.Set("X-Member-Level", claims.MemberLevel)
+	}
+	if claims.TenantID != "" {
+		c.Set("tenantID", claims.TenantID)
+		c.Request.Header.Set("X-Tenant-ID", claims.TenantID)
+	}
+	if claims.TenantRole != "" {
+		c.Request.Header.Set("X-Tenant-Role", claims.TenantRole)
+	}
+}
+
+func clearUntrustedIdentity(c *gin.Context) {
+	for _, header := range []string{"X-User-UUID", "X-Member-Level", "X-Tenant-ID", "X-Tenant-Role"} {
+		c.Request.Header.Del(header)
 	}
 }
 

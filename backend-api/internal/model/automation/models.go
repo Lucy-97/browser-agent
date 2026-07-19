@@ -4,6 +4,8 @@ import "time"
 
 type Job struct {
 	ID        string         `json:"job_id"`
+	TenantID  string         `json:"tenant_id"`
+	UserID    string         `json:"created_by_user_id,omitempty"`
 	Type      string         `json:"job_type"`
 	Adapter   string         `json:"adapter"`
 	Target    map[string]any `json:"target"`
@@ -19,6 +21,8 @@ type Job struct {
 type Run struct {
 	ID              string         `json:"run_id"`
 	JobID           string         `json:"job_id"`
+	TenantID        string         `json:"tenant_id"`
+	UserID          string         `json:"created_by_user_id,omitempty"`
 	DeviceID        string         `json:"device_id"`
 	Status          string         `json:"status"`
 	CurrentStep     string         `json:"current_step,omitempty"`
@@ -31,17 +35,21 @@ type Run struct {
 }
 
 type JobEnvelope struct {
-	JobID   string         `json:"job_id"`
-	RunID   string         `json:"run_id"`
-	JobType string         `json:"job_type"`
-	Adapter string         `json:"adapter"`
-	Target  map[string]any `json:"target"`
-	Input   map[string]any `json:"input"`
-	Policy  map[string]any `json:"policy"`
-	Cursor  map[string]any `json:"cursor,omitempty"`
+	JobID    string         `json:"job_id"`
+	RunID    string         `json:"run_id"`
+	TenantID string         `json:"-"`
+	UserID   string         `json:"-"`
+	JobType  string         `json:"job_type"`
+	Adapter  string         `json:"adapter"`
+	Target   map[string]any `json:"target"`
+	Input    map[string]any `json:"input"`
+	Policy   map[string]any `json:"policy"`
+	Cursor   map[string]any `json:"cursor,omitempty"`
 }
 
 type CreateJobRequest struct {
+	TenantID string         `json:"-"`
+	UserID   string         `json:"-"`
 	JobType  string         `json:"job_type"`
 	Adapter  string         `json:"adapter"`
 	Target   map[string]any `json:"target"`
@@ -79,6 +87,7 @@ type PolicyTemplate struct {
 type Artifact struct {
 	ID           string         `json:"artifact_id"`
 	RunID        string         `json:"run_id"`
+	TenantID     string         `json:"tenant_id"`
 	ArtifactType string         `json:"artifact_type"`
 	LocalPath    string         `json:"local_path,omitempty"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
@@ -90,6 +99,7 @@ type Artifact struct {
 type ManualAction struct {
 	ID         string         `json:"manual_action_id"`
 	RunID      string         `json:"run_id"`
+	TenantID   string         `json:"tenant_id"`
 	ActionType string         `json:"action_type"`
 	Message    string         `json:"message"`
 	Payload    map[string]any `json:"payload"`
@@ -107,13 +117,15 @@ type CompleteRunRequest struct {
 }
 
 type ListJobsOptions struct {
-	Status  string
-	Adapter string
-	Limit   int
-	Offset  int
+	TenantID string
+	Status   string
+	Adapter  string
+	Limit    int
+	Offset   int
 }
 
 type ListRunsOptions struct {
+	TenantID string
 	Status   string
 	JobID    string
 	DeviceID string
@@ -122,10 +134,11 @@ type ListRunsOptions struct {
 }
 
 type ListManualActionsOptions struct {
-	Status string
-	RunID  string
-	Limit  int
-	Offset int
+	TenantID string
+	Status   string
+	RunID    string
+	Limit    int
+	Offset   int
 }
 
 type ResolveManualActionRequest struct {

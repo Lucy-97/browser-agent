@@ -4,6 +4,8 @@ import "time"
 
 type Device struct {
 	ID            string         `json:"id"`
+	TenantID      string         `json:"tenant_id"`
+	UserID        string         `json:"user_id,omitempty"`
 	Name          string         `json:"name"`
 	Platform      string         `json:"platform"`
 	WorkerVersion string         `json:"worker_version"`
@@ -17,6 +19,8 @@ type Device struct {
 
 type Pairing struct {
 	ID                  string    `json:"pairing_id"`
+	TenantID            string    `json:"tenant_id,omitempty"`
+	ApprovedByUserID    string    `json:"approved_by_user_id,omitempty"`
 	Code                string    `json:"pairing_code"`
 	VerificationURI     string    `json:"verification_uri"`
 	ExpiresAt           time.Time `json:"expires_at"`
@@ -47,7 +51,8 @@ type HeartbeatRequest struct {
 }
 
 type ListDevicesOptions struct {
-	Status string
-	Limit  int
-	Offset int
+	TenantID string
+	Status   string
+	Limit    int
+	Offset   int
 }

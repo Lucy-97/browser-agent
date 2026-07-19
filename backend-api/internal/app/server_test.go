@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Lucy-97/browser-agent/backend-api/internal/config"
+	"github.com/Lucy-97/browser-agent/backend-api/internal/identity"
 )
 
 func TestAutomationMockJobLifecycle(t *testing.T) {
@@ -226,6 +227,167 @@ func TestRoleAuthTokens(t *testing.T) {
 	webAllowed := getJSON(t, server, "/web/automation/jobs", "web-token")
 	if webAllowed.Code != http.StatusOK {
 		t.Fatalf("web with token status = %d body=%s", webAllowed.Code, webAllowed.Body.String())
+	}
+}
+
+func TestTenantIsolationAndWorkerOwnership(t *testing.T) {
+	const internalSecret = "test-internal-secret"
+	server := NewServerWithConfig(config.Config{
+		ArtifactDir:           t.TempDir(),
+		InternalSecret:        internalSecret,
+		RequireTenantIdentity: true,
+	}).Handler()
+
+	missingIdentity := getJSON(t, server, "/web/automation/jobs", "")
+	if missingIdentity.Code != http.StatusUnauthorized {
+		t.Fatalf("missing tenant identity status = %d body=%s", missingIdentity.Code, missingIdentity.Body.String())
+	}
+	untrustedReq := httptest.NewRequest(http.MethodGet, "/web/automation/jobs", nil)
+	setActorHeaders(untrustedReq, "tenant_a", "user_a", identity.RoleTenantOwner, "")
+	untrustedResp := httptest.NewRecorder()
+	server.ServeHTTP(untrustedResp, untrustedReq)
+	if untrustedResp.Code != http.StatusForbidden {
+		t.Fatalf("untrusted tenant headers status = %d body=%s", untrustedResp.Code, untrustedResp.Body.String())
+	}
+
+	tokenA, deviceA := pairStrictWorker(t, server, "tenant_a", "user_a", internalSecret)
+	tokenB, _ := pairStrictWorker(t, server, "tenant_b", "user_b", internalSecret)
+
+	jobAResp := postJSONWithActor(t, server, "/admin/automation/jobs", map[string]any{
+		"job_type": "generic.browser.script",
+		"adapter":  "mock.echo",
+		"target":   map[string]any{"allowed_domains": []string{"example.com"}},
+		"input":    map[string]any{"message": "tenant a"},
+		"priority": 10,
+	}, "tenant_a", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	if jobAResp.Code != http.StatusCreated {
+		t.Fatalf("create tenant A job status = %d body=%s", jobAResp.Code, jobAResp.Body.String())
+	}
+	var jobA map[string]any
+	decodeJSON(t, jobAResp, &jobA)
+
+	jobBResp := postJSONWithActor(t, server, "/admin/automation/jobs", map[string]any{
+		"job_type": "generic.browser.script",
+		"adapter":  "mock.echo",
+		"target":   map[string]any{"allowed_domains": []string{"example.com"}},
+		"input":    map[string]any{"message": "tenant b"},
+		"priority": 100,
+	}, "tenant_b", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	if jobBResp.Code != http.StatusCreated {
+		t.Fatalf("create tenant B job status = %d body=%s", jobBResp.Code, jobBResp.Body.String())
+	}
+	var jobB map[string]any
+	decodeJSON(t, jobBResp, &jobB)
+
+	nextA := getJSON(t, server, "/worker/automation/jobs/next", tokenA)
+	if nextA.Code != http.StatusOK {
+		t.Fatalf("tenant A next job status = %d body=%s", nextA.Code, nextA.Body.String())
+	}
+	var claimedA map[string]any
+	decodeJSON(t, nextA, &claimedA)
+	if claimedA["job_id"] != jobA["job_id"] {
+		t.Fatalf("tenant A claimed job = %v, want %v", claimedA["job_id"], jobA["job_id"])
+	}
+	runA := claimedA["run_id"].(string)
+
+	nextB := getJSON(t, server, "/worker/automation/jobs/next", tokenB)
+	if nextB.Code != http.StatusOK {
+		t.Fatalf("tenant B next job status = %d body=%s", nextB.Code, nextB.Body.String())
+	}
+	var claimedB map[string]any
+	decodeJSON(t, nextB, &claimedB)
+	if claimedB["job_id"] != jobB["job_id"] {
+		t.Fatalf("tenant B claimed job = %v, want %v", claimedB["job_id"], jobB["job_id"])
+	}
+
+	foreignCheckpoint := postJSON(t, server, "/worker/automation/runs/"+runA+"/checkpoint", map[string]any{
+		"status": "running",
+	}, tokenB)
+	if foreignCheckpoint.Code != http.StatusNotFound {
+		t.Fatalf("foreign worker checkpoint status = %d body=%s", foreignCheckpoint.Code, foreignCheckpoint.Body.String())
+	}
+
+	artifactResp := postJSON(t, server, "/worker/automation/runs/"+runA+"/artifacts", map[string]any{
+		"artifact_type": "mock.summary",
+		"metadata":      map[string]any{"tenant": "a"},
+	}, tokenA)
+	if artifactResp.Code != http.StatusCreated {
+		t.Fatalf("tenant A artifact status = %d body=%s", artifactResp.Code, artifactResp.Body.String())
+	}
+	var artifact map[string]any
+	decodeJSON(t, artifactResp, &artifact)
+	manualActionResp := postJSON(t, server, "/worker/automation/runs/"+runA+"/manual-actions", map[string]any{
+		"action_type": "confirmation",
+		"message":     "tenant A confirmation",
+	}, tokenA)
+	if manualActionResp.Code != http.StatusCreated {
+		t.Fatalf("tenant A manual action status = %d body=%s", manualActionResp.Code, manualActionResp.Body.String())
+	}
+	var manualAction map[string]any
+	decodeJSON(t, manualActionResp, &manualAction)
+
+	listA := getJSONWithActor(t, server, "/admin/automation/jobs", "tenant_a", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	assertSingleTenantJob(t, listA, jobA["job_id"].(string), "tenant_a")
+	listB := getJSONWithActor(t, server, "/admin/automation/jobs", "tenant_b", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	assertSingleTenantJob(t, listB, jobB["job_id"].(string), "tenant_b")
+
+	foreignJob := getJSONWithActor(t, server, "/admin/automation/jobs/"+jobA["job_id"].(string), "tenant_b", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	if foreignJob.Code != http.StatusNotFound {
+		t.Fatalf("foreign job status = %d body=%s", foreignJob.Code, foreignJob.Body.String())
+	}
+	foreignArtifacts := getJSONWithActor(t, server, "/admin/automation/runs/"+runA+"/artifacts", "tenant_b", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	if foreignArtifacts.Code != http.StatusNotFound {
+		t.Fatalf("foreign run artifacts status = %d body=%s", foreignArtifacts.Code, foreignArtifacts.Body.String())
+	}
+	foreignDownload := getJSONWithActor(t, server, "/admin/automation/artifacts/"+artifact["artifact_id"].(string)+"/download", "tenant_b", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	if foreignDownload.Code != http.StatusNotFound {
+		t.Fatalf("foreign artifact download status = %d body=%s", foreignDownload.Code, foreignDownload.Body.String())
+	}
+	foreignCancel := postJSONWithActor(t, server, "/admin/automation/runs/"+runA+"/cancel", map[string]any{
+		"reason": "cross tenant cancel",
+	}, "tenant_b", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	if foreignCancel.Code != http.StatusNotFound {
+		t.Fatalf("foreign run cancel status = %d body=%s", foreignCancel.Code, foreignCancel.Body.String())
+	}
+	foreignResolve := postJSONWithActor(t, server, "/admin/automation/manual-actions/"+manualAction["manual_action_id"].(string)+"/resolve", map[string]any{
+		"status": "resolved",
+	}, "tenant_b", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	if foreignResolve.Code != http.StatusNotFound {
+		t.Fatalf("foreign manual action resolve status = %d body=%s", foreignResolve.Code, foreignResolve.Body.String())
+	}
+	foreignRevoke := postJSONWithActor(t, server, "/admin/worker/devices/"+deviceA+"/revoke", map[string]any{}, "tenant_b", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	if foreignRevoke.Code != http.StatusNotFound {
+		t.Fatalf("foreign device revoke status = %d body=%s", foreignRevoke.Code, foreignRevoke.Body.String())
+	}
+	devicesA := getJSONWithActor(t, server, "/admin/worker/devices", "tenant_a", "platform_admin", identity.RolePlatformAdmin, internalSecret)
+	assertSingleTenantDevice(t, devicesA, deviceA, "tenant_a")
+}
+
+func TestTenantViewerCannotCreateJobsOrApproveDevices(t *testing.T) {
+	const internalSecret = "test-internal-secret"
+	server := NewServerWithConfig(config.Config{
+		InternalSecret:        internalSecret,
+		RequireTenantIdentity: true,
+	}).Handler()
+
+	createJob := postJSONWithActor(t, server, "/web/automation/browser-act-jobs", map[string]any{
+		"url":             "https://example.com",
+		"task":            "open example",
+		"allowed_domains": []string{"example.com"},
+	}, "tenant_a", "viewer_a", identity.RoleTenantViewer, internalSecret)
+	if createJob.Code != http.StatusForbidden {
+		t.Fatalf("viewer create job status = %d body=%s", createJob.Code, createJob.Body.String())
+	}
+
+	pairingResp := postJSON(t, server, "/worker/devices/pairing", map[string]any{
+		"worker_version": "0.1.0",
+		"platform":       "windows-amd64",
+	}, "")
+	var pairing map[string]any
+	decodeJSON(t, pairingResp, &pairing)
+	approve := postJSONWithActor(t, server, "/web/worker/pairings/"+pairing["pairing_code"].(string)+"/approve", map[string]any{}, "tenant_a", "viewer_a", identity.RoleTenantViewer, internalSecret)
+	if approve.Code != http.StatusForbidden {
+		t.Fatalf("viewer approve device status = %d body=%s", approve.Code, approve.Body.String())
 	}
 }
 
@@ -461,6 +623,129 @@ func pairTestWorker(t *testing.T, handler http.Handler) string {
 		t.Fatalf("heartbeat status = %d body=%s", heartbeatResp.Code, heartbeatResp.Body.String())
 	}
 	return token
+}
+
+func pairStrictWorker(t *testing.T, handler http.Handler, tenantID string, userID string, internalSecret string) (string, string) {
+	t.Helper()
+	pairingResp := postJSON(t, handler, "/worker/devices/pairing", map[string]any{
+		"worker_version": "0.1.0",
+		"platform":       "windows-amd64",
+		"display_name":   "strict test worker",
+	}, "")
+	if pairingResp.Code != http.StatusCreated {
+		t.Fatalf("create strict pairing status = %d body=%s", pairingResp.Code, pairingResp.Body.String())
+	}
+	var pairing map[string]any
+	decodeJSON(t, pairingResp, &pairing)
+	pairingID := pairing["pairing_id"].(string)
+	pairingCode := pairing["pairing_code"].(string)
+
+	pendingResp := getJSON(t, handler, "/worker/devices/pairing/"+pairingID, "")
+	if pendingResp.Code != http.StatusOK {
+		t.Fatalf("get pending pairing status = %d body=%s", pendingResp.Code, pendingResp.Body.String())
+	}
+	var pending map[string]any
+	decodeJSON(t, pendingResp, &pending)
+	if pending["status"] != "pending" || pending["device_token"] != nil {
+		t.Fatalf("strict pairing before approval = %#v", pending)
+	}
+
+	approveResp := postJSONWithActor(t, handler, "/web/worker/pairings/"+pairingCode+"/approve", map[string]any{}, tenantID, userID, identity.RoleTenantOwner, internalSecret)
+	if approveResp.Code != http.StatusOK {
+		t.Fatalf("approve strict pairing status = %d body=%s", approveResp.Code, approveResp.Body.String())
+	}
+
+	approvedResp := getJSON(t, handler, "/worker/devices/pairing/"+pairingID, "")
+	if approvedResp.Code != http.StatusOK {
+		t.Fatalf("get approved pairing status = %d body=%s", approvedResp.Code, approvedResp.Body.String())
+	}
+	var approved map[string]any
+	decodeJSON(t, approvedResp, &approved)
+	token, ok := approved["device_token"].(string)
+	if !ok || token == "" {
+		t.Fatalf("approved pairing missing device token: %#v", approved)
+	}
+	device := approved["device"].(map[string]any)
+	deviceID := device["id"].(string)
+	if device["tenant_id"] != tenantID {
+		t.Fatalf("device tenant = %v, want %s", device["tenant_id"], tenantID)
+	}
+
+	heartbeatResp := postJSON(t, handler, "/worker/devices/"+deviceID+"/heartbeat", map[string]any{
+		"worker_version": "0.1.0",
+		"status":         "idle",
+		"capabilities":   []string{"adapter.mock.echo"},
+	}, token)
+	if heartbeatResp.Code != http.StatusOK {
+		t.Fatalf("strict worker heartbeat status = %d body=%s", heartbeatResp.Code, heartbeatResp.Body.String())
+	}
+	return token, deviceID
+}
+
+func postJSONWithActor(t *testing.T, handler http.Handler, path string, payload map[string]any, tenantID string, userID string, role string, internalSecret string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	setActorHeaders(req, tenantID, userID, role, internalSecret)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	return resp
+}
+
+func getJSONWithActor(t *testing.T, handler http.Handler, path string, tenantID string, userID string, role string, internalSecret string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	setActorHeaders(req, tenantID, userID, role, internalSecret)
+	resp := httptest.NewRecorder()
+	handler.ServeHTTP(resp, req)
+	return resp
+}
+
+func setActorHeaders(req *http.Request, tenantID string, userID string, role string, internalSecret string) {
+	req.Header.Set(identity.TenantIDHeader, tenantID)
+	req.Header.Set(identity.UserIDHeader, userID)
+	req.Header.Set(identity.TenantRoleHeader, role)
+	if internalSecret != "" {
+		req.Header.Set("X-Internal-Secret", internalSecret)
+	}
+}
+
+func assertSingleTenantJob(t *testing.T, resp *httptest.ResponseRecorder, jobID string, tenantID string) {
+	t.Helper()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("list tenant jobs status = %d body=%s", resp.Code, resp.Body.String())
+	}
+	var payload struct {
+		Jobs []map[string]any `json:"jobs"`
+	}
+	decodeJSON(t, resp, &payload)
+	if len(payload.Jobs) != 1 {
+		t.Fatalf("tenant jobs = %#v, want one job", payload.Jobs)
+	}
+	if payload.Jobs[0]["job_id"] != jobID || payload.Jobs[0]["tenant_id"] != tenantID {
+		t.Fatalf("tenant job = %#v, want job %s tenant %s", payload.Jobs[0], jobID, tenantID)
+	}
+}
+
+func assertSingleTenantDevice(t *testing.T, resp *httptest.ResponseRecorder, deviceID string, tenantID string) {
+	t.Helper()
+	if resp.Code != http.StatusOK {
+		t.Fatalf("list tenant devices status = %d body=%s", resp.Code, resp.Body.String())
+	}
+	var payload struct {
+		Devices []map[string]any `json:"devices"`
+	}
+	decodeJSON(t, resp, &payload)
+	if len(payload.Devices) != 1 {
+		t.Fatalf("tenant devices = %#v, want one device", payload.Devices)
+	}
+	if payload.Devices[0]["id"] != deviceID || payload.Devices[0]["tenant_id"] != tenantID {
+		t.Fatalf("tenant device = %#v, want device %s tenant %s", payload.Devices[0], deviceID, tenantID)
+	}
 }
 
 func decodeJSON(t *testing.T, resp *httptest.ResponseRecorder, target any) {

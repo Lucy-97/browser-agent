@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-19：完成生产化 Phase 1 首批基础能力：资源租户归属、可信 actor、严格 Worker 配对批准、Gateway 身份传递和双租户越权测试；下一步转向真实账号与 membership 校验。
 - 2026-07-19：同步线上客户交付路线，将账号租户隔离、生产部署、对象存储和 Worker 客户端交付提升为上线阻断项，并增加生产化技术方案索引。
 - 2026-07-19：仓库收敛为单一 Browser Agent 项目，`main` 为唯一长期主线；同步单环境启动方式、Windows Web → Worker → Admin 端到端验收和后续优先级。
 - 2026-07-09：首次整理 Browser Agent 交接说明，覆盖项目定位、当前实现状态、本地启动、核心代码地图、任务链路、已落地 adapter、验证命令、风险边界和后续待办。
@@ -281,8 +282,9 @@ Web /web/automation/weixin-desktop-sync-jobs
 
 ### P0 / 近期
 
-- 建立账号、租户、membership 和 RBAC，为 Worker device、job、run、artifact、manual action 强制 resource ownership，并补跨租户越权测试。
-- 统一 Gateway 与 Automation API 的生产鉴权链路；共享 Admin/Web token 只保留为本地开发或受控诊断能力。
+- 接入真实账号登录/注册和 active membership 校验，把当前 tenant/membership schema、角色与可信 actor 接到 JWT 签发链路。
+- 完成登录后的 Worker 配对 UI，并验证 owner/member/viewer/platform admin 的完整权限矩阵；资源 ownership 和双租户越权测试底座已完成。
+- 将已完成身份头清理/注入和 Automation 路由的 Gateway 部署到 staging；共享 Admin/Web token 只保留为本地开发或受控诊断能力。
 - 建立 staging/production 数据与部署基线：托管 MySQL/Redis、对象存储、Secret Manager、TLS、migration、备份恢复、不可变镜像和回滚。
 - 修复现有生产 Compose/K3s 草案与当前应用在环境变量、健康检查、端口、路由和持久化方面的不一致。
 

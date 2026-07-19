@@ -6,23 +6,49 @@ import (
 
 type Repository interface {
 	CreatePairing(req workermodel.PairingRequest) workermodel.Pairing
+	ApprovePairing(pairingCode string, tenantID string, userID string) error
 	GetPairing(pairingID string) (workermodel.Pairing, error)
 	DeviceByToken(token string) (workermodel.Device, error)
 	ListDevices(opts workermodel.ListDevicesOptions) ([]workermodel.Device, error)
 	Heartbeat(deviceID string, req workermodel.HeartbeatRequest) (workermodel.Device, error)
-	RevokeDevice(deviceID string) (workermodel.Device, error)
+	RevokeDevice(tenantID string, deviceID string) (workermodel.Device, error)
 }
 
 type Engine struct {
-	repo Repository
+	repo               Repository
+	autoApprovePairing bool
+	defaultTenantID    string
+	defaultUserID      string
 }
 
-func New(repo Repository) *Engine {
-	return &Engine{repo: repo}
+type Options struct {
+	AutoApprovePairing bool
+	DefaultTenantID    string
+	DefaultUserID      string
+}
+
+func New(repo Repository, options ...Options) *Engine {
+	engine := &Engine{repo: repo}
+	if len(options) > 0 {
+		engine.autoApprovePairing = options[0].AutoApprovePairing
+		engine.defaultTenantID = options[0].DefaultTenantID
+		engine.defaultUserID = options[0].DefaultUserID
+	}
+	return engine
 }
 
 func (engine *Engine) CreatePairing(req workermodel.PairingRequest) workermodel.Pairing {
-	return engine.repo.CreatePairing(req)
+	pairing := engine.repo.CreatePairing(req)
+	if engine.autoApprovePairing {
+		if err := engine.repo.ApprovePairing(pairing.Code, engine.defaultTenantID, engine.defaultUserID); err != nil {
+			panic(err)
+		}
+	}
+	return pairing
+}
+
+func (engine *Engine) ApprovePairing(pairingCode string, tenantID string, userID string) error {
+	return engine.repo.ApprovePairing(pairingCode, tenantID, userID)
 }
 
 func (engine *Engine) GetPairing(pairingID string) (workermodel.Pairing, error) {
@@ -50,6 +76,6 @@ func (engine *Engine) Heartbeat(deviceID string, req workermodel.HeartbeatReques
 	return engine.repo.Heartbeat(deviceID, req)
 }
 
-func (engine *Engine) RevokeDevice(deviceID string) (workermodel.Device, error) {
-	return engine.repo.RevokeDevice(deviceID)
+func (engine *Engine) RevokeDevice(tenantID string, deviceID string) (workermodel.Device, error) {
+	return engine.repo.RevokeDevice(tenantID, deviceID)
 }

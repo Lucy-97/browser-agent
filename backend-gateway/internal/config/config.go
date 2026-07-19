@@ -64,8 +64,7 @@ func Load() *Config {
 				"/api/v1/auth",
 				"/oauth2/",
 				"/login/oauth2/",
-				"/internal/",
-				"/admin",
+				"/worker/",
 			},
 		},
 		Redis: RedisConfig{

@@ -24,6 +24,8 @@ type Manager struct {
 type claims struct {
 	UserUUID    string `json:"sub"`
 	MemberLevel string `json:"lvl,omitempty"`
+	TenantID    string `json:"tenant_id,omitempty"`
+	TenantRole  string `json:"tenant_role,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -38,10 +40,17 @@ func NewManager(secret string, accessExpSec, refreshExpDays int) *Manager {
 
 // IssueAccessToken 签发短期访问 token。
 func (m *Manager) IssueAccessToken(userUUID, memberLevel string) (string, error) {
+	return m.IssueTenantAccessToken(userUUID, memberLevel, "", "")
+}
+
+// IssueTenantAccessToken 签发带租户上下文的短期访问 token。
+func (m *Manager) IssueTenantAccessToken(userUUID, memberLevel, tenantID, tenantRole string) (string, error) {
 	now := time.Now()
 	c := claims{
 		UserUUID:    userUUID,
 		MemberLevel: memberLevel,
+		TenantID:    tenantID,
+		TenantRole:  tenantRole,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(m.accessTokenExpSec) * time.Second)),
@@ -83,5 +92,7 @@ func (m *Manager) ValidateToken(token string) (pmw.Claims, error) {
 	return pmw.Claims{
 		UserUUID:    c.UserUUID,
 		MemberLevel: c.MemberLevel,
+		TenantID:    c.TenantID,
+		TenantRole:  c.TenantRole,
 	}, nil
 }
