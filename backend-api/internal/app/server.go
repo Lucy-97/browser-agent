@@ -9,13 +9,16 @@ import (
 
 	"github.com/Lucy-97/browser-agent/backend-api/internal/config"
 	"github.com/Lucy-97/browser-agent/backend-api/internal/database"
+	authengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/auth"
 	automationengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/automation"
 	workerengine "github.com/Lucy-97/browser-agent/backend-api/internal/engine/worker"
 	basehandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler"
+	authhandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler/auth"
 	automationhandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler/automation"
 	workerhandler "github.com/Lucy-97/browser-agent/backend-api/internal/handler/worker"
 	"github.com/Lucy-97/browser-agent/backend-api/internal/identity"
 	"github.com/Lucy-97/browser-agent/backend-api/internal/lock"
+	authrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/auth"
 	automationrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/automation"
 	workerrepo "github.com/Lucy-97/browser-agent/backend-api/internal/repository/worker"
 )
@@ -31,31 +34,40 @@ func NewServer() *Server {
 func NewServerWithConfig(cfg config.Config) *Server {
 	mux := http.NewServeMux()
 
-	workerRepo, automationRepo := buildRepositories(cfg)
+	workerRepo, automationRepo, authRepo := buildRepositories(cfg)
 	claimLocker := buildClaimLocker(cfg)
 
 	workerEngine := workerengine.New(workerRepo, workerengine.Options{
-		AutoApprovePairing: !cfg.RequireTenantIdentity,
+		AutoApprovePairing: !cfg.RequireTenantIdentity && !cfg.RequirePairingApproval,
 		DefaultTenantID:    defaultString(cfg.DefaultTenantID, "tenant_local"),
 		DefaultUserID:      defaultString(cfg.DefaultUserID, "user_local"),
 	})
 	automationEngine := automationengine.New(automationRepo, claimLocker)
+	authEngine := authengine.New(authRepo, authengine.Options{
+		JWTSecret:               cfg.JWTSecret,
+		AccessTokenTTL:          time.Duration(cfg.JWTAccessTokenExpSec) * time.Second,
+		AllowPublicRegistration: cfg.AllowRegistration,
+	})
 
 	workerHandler := workerhandler.New(workerEngine)
 	automationHandler := automationhandler.New(automationEngine, workerHandler, cfg.ArtifactDir)
+	authHandler := authhandler.New(authEngine, authhandler.Options{
+		CookieName: cfg.AuthCookieName, CookieSecure: cfg.AuthCookieSecure,
+	})
 
+	authHandler.Register(mux)
 	workerHandler.Register(mux)
 	automationHandler.Register(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	return &Server{handler: withLocalCORS(withRoleAuth(withActorIdentity(mux, cfg), cfg))}
+	return &Server{handler: withLocalCORS(withRoleAuth(withActorIdentity(mux, cfg, authEngine), cfg))}
 }
 
-func buildRepositories(cfg config.Config) (workerengine.Repository, automationengine.Repository) {
+func buildRepositories(cfg config.Config) (workerengine.Repository, automationengine.Repository, authengine.Repository) {
 	if cfg.MySQLDSN == "" {
-		return workerrepo.NewMemoryRepository(), automationrepo.NewMemoryRepository()
+		return workerrepo.NewMemoryRepository(), automationrepo.NewMemoryRepository(), authrepo.NewMemoryRepository()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -63,7 +75,7 @@ func buildRepositories(cfg config.Config) (workerengine.Repository, automationen
 	if err != nil {
 		panic(err)
 	}
-	return workerrepo.NewMySQLRepository(db), automationrepo.NewMySQLRepository(db)
+	return workerrepo.NewMySQLRepository(db), automationrepo.NewMySQLRepository(db), authrepo.NewMySQLRepository(db)
 }
 
 func (server *Server) Handler() http.Handler {
@@ -87,6 +99,7 @@ func withLocalCORS(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		if isLocalOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Internal-Secret, X-Admin-Token, X-Web-Token")
@@ -129,7 +142,11 @@ func tokenMatches(r *http.Request, headerName string, expected string) bool {
 	return token != "" && token == expected
 }
 
-func withActorIdentity(next http.Handler, cfg config.Config) http.Handler {
+type membershipVerifier interface {
+	IsActiveMembership(ctx context.Context, tenantID string, userID string, role string) (bool, error)
+}
+
+func withActorIdentity(next http.Handler, cfg config.Config, verifier membershipVerifier) http.Handler {
 	defaultTenantID := defaultString(cfg.DefaultTenantID, "tenant_local")
 	defaultUserID := defaultString(cfg.DefaultUserID, "user_local")
 
@@ -152,6 +169,17 @@ func withActorIdentity(next http.Handler, cfg config.Config) http.Handler {
 			if strings.HasPrefix(r.URL.Path, "/admin/") && actor.Role != identity.RolePlatformAdmin {
 				basehandler.WriteError(w, http.StatusForbidden, "PLATFORM_ADMIN_REQUIRED", "platform admin role is required", false)
 				return
+			}
+			if cfg.RequireMembership && strings.HasPrefix(r.URL.Path, "/web/") && actor.Role != identity.RolePlatformAdmin {
+				active, err := verifier.IsActiveMembership(r.Context(), actor.TenantID, actor.UserID, actor.Role)
+				if err != nil {
+					basehandler.WriteError(w, http.StatusServiceUnavailable, "MEMBERSHIP_CHECK_FAILED", "tenant membership could not be verified", true)
+					return
+				}
+				if !active {
+					basehandler.WriteError(w, http.StatusForbidden, "MEMBERSHIP_INACTIVE", "active tenant membership is required", false)
+					return
+				}
 			}
 		} else {
 			if cfg.RequireTenantIdentity {

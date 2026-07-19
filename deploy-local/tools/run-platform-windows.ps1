@@ -58,8 +58,11 @@ function Start-Platform {
     $env:ARTIFACT_DIR = $artifactDir
 
     $apiPort = $env:API_ADDR.TrimStart(':')
-    $env:GO_API_BASE_URL = "http://127.0.0.1:$apiPort"
-    $env:ADMIN_API_BASE_URL = $env:GO_API_BASE_URL
+    $gatewayPort = $env:GATEWAY_PORT
+    $env:API_SERVICE_URL = "http://127.0.0.1:$apiPort"
+    $env:INTERNAL_API_SECRET = $env:INTERNAL_SECRET
+    $env:GO_API_BASE_URL = "http://127.0.0.1:$gatewayPort"
+    $env:ADMIN_API_BASE_URL = "http://127.0.0.1:$apiPort"
 
     $goCommand = Get-Command go.exe -ErrorAction SilentlyContinue
     if ($goCommand) {
@@ -79,7 +82,17 @@ function Start-Platform {
         Pop-Location
     }
 
+    $gatewayBinary = Join-Path $RunDir "$Environment-backend-gateway.exe"
+    Push-Location (Join-Path $RootDir "backend-gateway")
+    try {
+        & $go build -o $gatewayBinary ./cmd/gateway
+        if ($LASTEXITCODE -ne 0) { throw "backend-gateway build failed" }
+    } finally {
+        Pop-Location
+    }
+
     Stop-ServiceTree "backend-api"
+    Stop-ServiceTree "backend-gateway"
     Stop-ServiceTree "frontend-web"
     Stop-ServiceTree "frontend-admin"
 
@@ -87,6 +100,11 @@ function Start-Platform {
         -RedirectStandardOutput (Join-Path $LogDir "$Environment-backend-api.log") `
         -RedirectStandardError (Join-Path $LogDir "$Environment-backend-api.error.log") -PassThru
     Set-Content -LiteralPath (Join-Path $RunDir "$Environment-backend-api.pid") -Value $api.Id
+
+    $gateway = Start-Process -FilePath $gatewayBinary -WorkingDirectory (Join-Path $RootDir "backend-gateway") -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $LogDir "$Environment-backend-gateway.log") `
+        -RedirectStandardError (Join-Path $LogDir "$Environment-backend-gateway.error.log") -PassThru
+    Set-Content -LiteralPath (Join-Path $RunDir "$Environment-backend-gateway.pid") -Value $gateway.Id
 
     $web = Start-Process -FilePath "npm.cmd" -ArgumentList @("run", "dev", "--", "-H", "0.0.0.0", "-p", $env:WEB_PORT) `
         -WorkingDirectory (Join-Path $RootDir "frontend-web") -WindowStyle Hidden `
@@ -100,14 +118,16 @@ function Start-Platform {
         -RedirectStandardError (Join-Path $LogDir "$Environment-frontend-admin.error.log") -PassThru
     Set-Content -LiteralPath (Join-Path $RunDir "$Environment-frontend-admin.pid") -Value $admin.Id
 
-    Write-Output "API:   http://localhost:$apiPort"
-    Write-Output "Web:   http://localhost:$($env:WEB_PORT)"
-    Write-Output "Admin: http://localhost:$($env:ADMIN_PORT)"
+    Write-Output "Gateway: http://localhost:$gatewayPort"
+    Write-Output "API:     http://localhost:$apiPort"
+    Write-Output "Web:     http://localhost:$($env:WEB_PORT)"
+    Write-Output "Admin:   http://localhost:$($env:ADMIN_PORT)"
 }
 
 function Show-Status {
     Import-DotEnv $EnvFile
     $services = @(
+        @{ Name = "Gateway"; Port = [int]$env:GATEWAY_PORT },
         @{ Name = "API"; Port = [int]$env:API_ADDR.TrimStart(':') },
         @{ Name = "Web"; Port = [int]$env:WEB_PORT },
         @{ Name = "Admin"; Port = [int]$env:ADMIN_PORT }
@@ -126,11 +146,13 @@ switch ($Action) {
     "start" { Start-Platform }
     "stop" {
         Stop-ServiceTree "backend-api"
+        Stop-ServiceTree "backend-gateway"
         Stop-ServiceTree "frontend-web"
         Stop-ServiceTree "frontend-admin"
     }
     "restart" {
         Stop-ServiceTree "backend-api"
+        Stop-ServiceTree "backend-gateway"
         Stop-ServiceTree "frontend-web"
         Stop-ServiceTree "frontend-admin"
         Start-Platform

@@ -20,6 +20,10 @@ const nextConfig: NextConfig = {
         destination: `${GO_API_BASE}/admin/:path*`,
       },
       {
+        source: "/api/v1/:path*",
+        destination: `${GO_API_BASE}/api/v1/:path*`,
+      },
+      {
         source: "/api/:path*",
         destination: `${GO_API_BASE}/:path*`,
       },

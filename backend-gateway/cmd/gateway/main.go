@@ -22,8 +22,8 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Lucy-97/browser-agent/backend-gateway/internal/config"
-	"github.com/Lucy-97/browser-agent/backend-gateway/internal/router"
 	pmw "github.com/Lucy-97/browser-agent/backend-gateway/internal/middleware"
+	"github.com/Lucy-97/browser-agent/backend-gateway/internal/router"
 	gwjwt "github.com/Lucy-97/browser-agent/backend-gateway/pkg/jwt"
 )
 
@@ -51,10 +51,15 @@ func main() {
 	r.Use(pmw.RequestID())
 	r.Use(pmw.PrometheusMetrics())
 	r.Use(pmw.JWT(jwtManager, pmw.JWTOptions{
-		PublicPathPrefixes:     cfg.JWT.PublicPaths,
+		PublicPaths:            cfg.JWT.PublicPaths,
+		PublicPathPrefixes:     cfg.JWT.PublicPathPrefixes,
+		AccessTokenCookie:      cfg.JWT.AccessTokenCookie,
 		RefreshTokenCookieName: "refreshToken_",
 	}))
 	if rdb != nil {
+		r.Use(pmw.RateLimitPaths(pmw.NewRedisRateLimiter(rdb, 10, time.Minute), []string{
+			"/api/v1/auth/register", "/api/v1/auth/login",
+		}))
 		r.Use(pmw.RateLimit(pmw.NewRedisRateLimiter(rdb, 300, time.Minute)))
 	}
 

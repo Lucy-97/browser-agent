@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-19：本地平台接入 Gateway、邮箱密码账号、HttpOnly Cookie 会话、active membership 校验和登录后 Worker 配对；Windows 一键启动现在同时管理 Gateway。
 - 2026-07-19：仓库收敛为单一 Browser Agent 项目；启动脚本固定优先加载 `.env.browser-agent`，统一默认端口和服务命名。
 - 2026-07-19：新增 Windows Browser Agent 一键端到端验收，通过 Web 代理创建确定性任务、真实 Chromium 执行，并从 Admin 代理校验 run、trace 和截图；移除已失效的旧 demo 命令。
 - 2026-07-17：新增 Windows 原生平台与 Worker 启停脚本，覆盖 Go API、Web、Admin、Worker 的隐藏窗口常驻运行、状态检查、日志和 PID 管理。
@@ -37,12 +38,13 @@ bash deploy-local/tools/db-apply.sh all
 
 ```bash
 bash deploy-local/tools/run-api-host-local.sh start
+bash deploy-local/tools/run-gateway-host-local.sh start
 bash deploy-local/tools/run-admin-host-local.sh start
 bash deploy-local/tools/run-web-host-local.sh start
 bash deploy-local/tools/run-worker-host-local.sh start
 ```
 
-模板默认使用 API `29001`、Web `24001`、Admin `26174`、MySQL `24307` 和 Redis `27380`。未配置 `MYSQL_DSN` 时，`backend-api` 使用内存 repository，进程重启后状态会丢失；未配置 `REDIS_ADDR` 时使用 no-op locker，便于无 Redis 的本地 mock 验收。
+模板默认使用 Gateway `29000`、API `29001`、Web `24001`、Admin `26174`、MySQL `24307` 和 Redis `27380`。Web 的客户请求通过 Gateway 进入 API；Admin 和 Worker 在本地开发模式下仍可直连 API。未配置 `MYSQL_DSN` 时，`backend-api` 使用内存 repository，进程重启后状态会丢失；未配置 `REDIS_ADDR` 时使用 no-op locker，便于无 Redis 的本地 mock 验收。
 
 当前 Redis 用于 `automation:jobs:claim` 短租约锁，保护多 API 实例并发领取任务。
 
@@ -57,9 +59,9 @@ docker compose --env-file deploy-local/.env.browser-agent -f deploy-local/docker
 bash deploy-local/tools/db-apply.sh all
 ```
 
-若 Windows 没有 Bash，可进入 MySQL 容器依次应用 `database/init.sql`、`database/migrations/000000-baseline.sql`、`database/migrations/20260618_automation_platform_schema.sql` 和 `database/migrations/20260618_worker_device_token_hash.sql`。已初始化的数据卷不需要重复执行。
+若 Windows 没有 Bash，可进入 MySQL 容器先应用 `database/init.sql`，再按文件名顺序应用 `database/migrations/*.sql`。migration 均需保持幂等；已应用的 migration 可安全重复执行。
 
-启动和检查 API、Web、Admin：
+启动和检查 Gateway、API、Web、Admin：
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-platform-windows.ps1 start -Environment browser-agent
@@ -78,7 +80,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/tools/run-w
 
 Windows 未配置系统凭据存储时，本地开发环境可在忽略提交的 `.env.browser-agent` 中设置 `BROWSER_AGENT_WORKER_ALLOW_INSECURE_FILE_SECRETS=1`。这会把 Worker token 保存在用户应用数据目录，只适合受控的本地开发机，生产环境禁止使用。
 
-`browser-agent` 默认访问地址：Web `http://localhost:24001`、Admin `http://localhost:26174`、API `http://localhost:29001`、MySQL `127.0.0.1:24307`、Redis `127.0.0.1:27380`。停止服务时把 `start` 改为 `stop`；重启时改为 `restart`。日志位于 `deploy-local/logs/`，PID 文件位于 `deploy-local/run/`。
+`browser-agent` 默认访问地址：Web `http://localhost:24001`、Admin `http://localhost:26174`、Gateway `http://localhost:29000`、API `http://localhost:29001`、MySQL `127.0.0.1:24307`、Redis `127.0.0.1:27380`。停止服务时把 `start` 改为 `stop`；重启时改为 `restart`。日志位于 `deploy-local/logs/`，PID 文件位于 `deploy-local/run/`。
 
 ## 二、服务管理
 
@@ -106,6 +108,15 @@ bash deploy-local/tools/run-api-host-local.sh status
 bash deploy-local/tools/run-api-host-local.sh logs
 bash deploy-local/tools/run-api-host-local.sh restart
 bash deploy-local/tools/run-api-host-local.sh stop
+```
+
+Gateway：
+
+```bash
+bash deploy-local/tools/run-gateway-host-local.sh status
+bash deploy-local/tools/run-gateway-host-local.sh logs
+bash deploy-local/tools/run-gateway-host-local.sh restart
+bash deploy-local/tools/run-gateway-host-local.sh stop
 ```
 
 Admin：
@@ -138,22 +149,31 @@ Web 默认访问：
 http://localhost:24001
 ```
 
-如果 `24001` 已被占用，脚本会选择下一个空闲端口，并在 `deploy-local/run/browser_agent-frontend-web.port` 记录真实端口。Web 通过 Next.js rewrite 访问 `http://127.0.0.1:29001` 的 `/web/*` API；`backend-api` 已对 localhost origin 开启本地 CORS。
+如果 `24001` 已被占用，脚本会选择下一个空闲端口，并在 `deploy-local/run/browser_agent-frontend-web.port` 记录真实端口。Web 通过 Next.js rewrite 访问 `http://127.0.0.1:29000` 的 Gateway；Gateway 校验登录 Cookie/JWT、清除外部伪造身份头并向 API 注入可信租户身份。
 
 本地鉴权边界：
 
 ```text
 INTERNAL_SECRET=local-dev-internal-secret
+INTERNAL_API_SECRET=${INTERNAL_SECRET}
 ADMIN_API_TOKEN=
 WEB_API_TOKEN=
+JWT_SECRET=replace-with-a-random-local-development-secret
+AUTH_COOKIE_NAME=browser_agent_access
+AUTH_COOKIE_SECURE=false
+ALLOW_PUBLIC_REGISTRATION=true
 DEFAULT_TENANT_ID=tenant_local
 DEFAULT_USER_ID=user_local
 REQUIRE_TENANT_IDENTITY=false
+REQUIRE_MEMBERSHIP_VALIDATION=true
+REQUIRE_WORKER_PAIRING_APPROVAL=true
 ```
 
 `ADMIN_API_TOKEN` 或 `WEB_API_TOKEN` 为空时，对应接口保持本地开发免 token；配置后，`/admin/*` 需要 `X-Admin-Token` 或 `Authorization: Bearer ...`，`/web/*` 需要 `X-Web-Token` 或 `Authorization: Bearer ...`。Admin dev server 会从本地环境文件注入 `VITE_ADMIN_API_TOKEN`；浏览器端可通过 localStorage 设置 `browser-agent.adminToken` 或 `browser-agent.webToken`。
 
-`REQUIRE_TENANT_IDENTITY=false` 只用于本地单租户开发：API 会使用 `DEFAULT_TENANT_ID` / `DEFAULT_USER_ID`，并自动批准本机 Worker 配对。staging/production 必须设置为 `true`；此时 `/web/*` 与 `/admin/*` 只接受 Gateway 注入并由 `X-Internal-Secret` 保护的 `X-Tenant-ID`、`X-User-UUID`、`X-Tenant-Role`，Worker 配对也必须由 `tenant_owner` 或 `platform_admin` 批准。Gateway 的 `INTERNAL_API_SECRET` 必须与 API 的 `INTERNAL_SECRET` 来自同一个 Secret Manager 条目，API 端口不得直接暴露公网。
+`REQUIRE_TENANT_IDENTITY=false` 只用于保留本地 Admin/诊断兼容；经 Gateway 进入的 Web 请求仍使用真实账号和租户身份。`REQUIRE_MEMBERSHIP_VALIDATION=true` 会在每次 `/web/*` 请求进入业务处理前校验用户、租户、membership 和角色均为 active。`REQUIRE_WORKER_PAIRING_APPROVAL=true` 会关闭本地自动配对，要求登录后的 `tenant_owner` 或 `platform_admin` 明确批准。
+
+staging/production 必须设置 `REQUIRE_TENANT_IDENTITY=true`、`REQUIRE_MEMBERSHIP_VALIDATION=true`、`REQUIRE_WORKER_PAIRING_APPROVAL=true`、`AUTH_COOKIE_SECURE=true` 和 `ALLOW_PUBLIC_REGISTRATION=false`。Gateway 的 `JWT_SECRET` 必须与 API 一致，`INTERNAL_API_SECRET` 必须与 API 的 `INTERNAL_SECRET` 来自同一个 Secret Manager 条目，API 端口不得直接暴露公网。开放注册仅用于本地或明确批准的活动；封闭内测账号应由运营邀请/创建。
 
 Worker：
 
@@ -177,8 +197,10 @@ deploy-local/logs/worker-local.log
 
 ```text
 deploy-local/logs/backend-api.log
+deploy-local/logs/browser_agent-backend-gateway.log
 deploy-local/logs/worker-local.log
 tmux session: browser_agent-backend-api-local
+tmux session: browser_agent-backend-gateway-local
 tmux session: browser_agent-worker-local
 ```
 
@@ -222,7 +244,7 @@ Browser Agent Windows 端到端验收：
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File deploy-local/integration-test/30-browser-agent-windows.ps1 -Environment browser-agent
 ```
 
-该脚本要求 API、Web、Admin 和已配对 Worker 均已启动。它通过 Web 的 Next.js 代理创建 `deterministic_search` 任务，让 Worker 控制真实 headless Chromium 打开内嵌 fixture、填写并提交搜索；随后通过 Web 查询 run，并通过 Admin 代理校验任务完成以及 `agent_trace`、`screenshot` 两类 artifact。此模式不调用 LLM，适合稳定的环境验收。
+该脚本要求 Gateway、API、Web、Admin 和已配对 Worker 均已启动。它通过 Web 的 Next.js 代理和 Gateway 创建 `deterministic_search` 任务，让 Worker 控制真实 headless Chromium 打开内嵌 fixture、填写并提交搜索；随后通过 Web 查询 run，并通过 Admin 代理校验任务完成以及 `agent_trace`、`screenshot` 两类 artifact。此模式不调用 LLM，适合稳定的环境验收。
 
 ## 四、完整本地验收流程
 
@@ -361,4 +383,4 @@ curl -X POST "http://127.0.0.1:29001/admin/automation/manual-actions/<manual_act
 2. MySQL schema 已在 `database/init.sql` 和 `database/migrations/` 中定义，`deploy-local/tools/db-apply.sh` 可应用基线和迁移。
 3. Redis 已接入 job claim 短锁；未配置时不会影响本地 mock 流程。
 4. Worker 已支持 automation runtime、mock adapter 和 `generic.browser_agent` PoC。
-5. Admin 已有 Automation 调试控制台首版；Web 已有 Browser Agent、版权检索、社媒运营和微信资料同步入口；Gateway 和 AI Engine 的本地启动脚本后续补齐。
+5. Admin 已有 Automation 调试控制台首版；Web 已有账号登录、Worker 配对、Browser Agent、版权检索、社媒运营和微信资料同步入口；Gateway 已纳入本地启动，AI Engine 的独立本地启动仍待统一。

@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export function WorkerSetup() {
   return (
     <div className="panel">
@@ -9,6 +11,9 @@ export function WorkerSetup() {
         <code className="code-block">bash deploy-local/tools/run-worker-host-local.sh init</code>
         <code className="code-block">bash deploy-local/tools/run-worker-host-local.sh pair</code>
         <code className="code-block">bash deploy-local/tools/run-worker-host-local.sh start</code>
+        <Link href="/worker/pair" className="btn btn-primary" style={{ width: "fit-content", textDecoration: "none" }}>
+          输入配对码
+        </Link>
       </div>
       <div
         style={{

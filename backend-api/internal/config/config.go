@@ -3,21 +3,28 @@ package config
 import "os"
 
 type Config struct {
-	Addr                  string
-	ArtifactDir           string
-	InternalSecret        string
-	AdminAPIToken         string
-	WebAPIToken           string
-	DefaultTenantID       string
-	DefaultUserID         string
-	RequireTenantIdentity bool
-	MySQLDSN              string
-	MySQLMaxOpen          int
-	MySQLMaxIdle          int
-	RedisAddr             string
-	RedisPassword         string
-	RedisDB               int
-	AdminAPIURL           string
+	Addr                   string
+	ArtifactDir            string
+	InternalSecret         string
+	AdminAPIToken          string
+	WebAPIToken            string
+	DefaultTenantID        string
+	DefaultUserID          string
+	RequireTenantIdentity  bool
+	RequireMembership      bool
+	RequirePairingApproval bool
+	JWTSecret              string
+	JWTAccessTokenExpSec   int
+	AuthCookieName         string
+	AuthCookieSecure       bool
+	AllowRegistration      bool
+	MySQLDSN               string
+	MySQLMaxOpen           int
+	MySQLMaxIdle           int
+	RedisAddr              string
+	RedisPassword          string
+	RedisDB                int
+	AdminAPIURL            string
 }
 
 func Load() Config {
@@ -26,21 +33,28 @@ func Load() Config {
 		addr = ":29001"
 	}
 	return Config{
-		Addr:                  addr,
-		ArtifactDir:           os.Getenv("ARTIFACT_DIR"),
-		InternalSecret:        os.Getenv("INTERNAL_SECRET"),
-		AdminAPIToken:         os.Getenv("ADMIN_API_TOKEN"),
-		WebAPIToken:           os.Getenv("WEB_API_TOKEN"),
-		DefaultTenantID:       envString("DEFAULT_TENANT_ID", "tenant_local"),
-		DefaultUserID:         envString("DEFAULT_USER_ID", "user_local"),
-		RequireTenantIdentity: envBool("REQUIRE_TENANT_IDENTITY", false),
-		MySQLDSN:              os.Getenv("MYSQL_DSN"),
-		MySQLMaxOpen:          envInt("MYSQL_MAX_OPEN_CONNS", 10),
-		MySQLMaxIdle:          envInt("MYSQL_MAX_IDLE_CONNS", 5),
-		RedisAddr:             os.Getenv("REDIS_ADDR"),
-		RedisPassword:         os.Getenv("REDIS_PASSWORD"),
-		RedisDB:               envInt("REDIS_DB", 0),
-		AdminAPIURL:           os.Getenv("ADMIN_API_BASE_URL"),
+		Addr:                   addr,
+		ArtifactDir:            os.Getenv("ARTIFACT_DIR"),
+		InternalSecret:         os.Getenv("INTERNAL_SECRET"),
+		AdminAPIToken:          os.Getenv("ADMIN_API_TOKEN"),
+		WebAPIToken:            os.Getenv("WEB_API_TOKEN"),
+		DefaultTenantID:        envString("DEFAULT_TENANT_ID", "tenant_local"),
+		DefaultUserID:          envString("DEFAULT_USER_ID", "user_local"),
+		RequireTenantIdentity:  envBool("REQUIRE_TENANT_IDENTITY", false),
+		RequireMembership:      envBool("REQUIRE_MEMBERSHIP_VALIDATION", false),
+		RequirePairingApproval: envBool("REQUIRE_WORKER_PAIRING_APPROVAL", false),
+		JWTSecret:              os.Getenv("JWT_SECRET"),
+		JWTAccessTokenExpSec:   envInt("JWT_ACCESS_TOKEN_EXP_SEC", 3600),
+		AuthCookieName:         envString("AUTH_COOKIE_NAME", "browser_agent_access"),
+		AuthCookieSecure:       envBool("AUTH_COOKIE_SECURE", false),
+		AllowRegistration:      envBool("ALLOW_PUBLIC_REGISTRATION", false),
+		MySQLDSN:               os.Getenv("MYSQL_DSN"),
+		MySQLMaxOpen:           envInt("MYSQL_MAX_OPEN_CONNS", 10),
+		MySQLMaxIdle:           envInt("MYSQL_MAX_IDLE_CONNS", 5),
+		RedisAddr:              os.Getenv("REDIS_ADDR"),
+		RedisPassword:          os.Getenv("REDIS_PASSWORD"),
+		RedisDB:                envInt("REDIS_DB", 0),
+		AdminAPIURL:            os.Getenv("ADMIN_API_BASE_URL"),
 	}
 }
 

@@ -230,6 +230,127 @@ func TestRoleAuthTokens(t *testing.T) {
 	}
 }
 
+func TestAccountRegistrationLoginAndMembershipValidation(t *testing.T) {
+	const internalSecret = "test-internal-secret"
+	server := NewServerWithConfig(config.Config{
+		InternalSecret:        internalSecret,
+		RequireTenantIdentity: true,
+		RequireMembership:     true,
+		JWTSecret:             "test-jwt-secret-with-enough-entropy",
+		JWTAccessTokenExpSec:  300,
+		AuthCookieName:        "browser_agent_access",
+		AllowRegistration:     true,
+	}).Handler()
+
+	register := postJSON(t, server, "/api/v1/auth/register", map[string]any{
+		"email":       "owner@example.com",
+		"password":    "correct horse battery staple",
+		"nickname":    "Owner",
+		"tenant_name": "Example Studio",
+	}, "")
+	if register.Code != http.StatusCreated {
+		t.Fatalf("register status = %d body=%s", register.Code, register.Body.String())
+	}
+	var registered map[string]any
+	decodeJSON(t, register, &registered)
+	if registered["access_token"] == "" || registered["role"] != identity.RoleTenantOwner {
+		t.Fatalf("registered auth result = %#v", registered)
+	}
+	userID := registered["user"].(map[string]any)["user_id"].(string)
+	tenantID := registered["tenant"].(map[string]any)["tenant_id"].(string)
+
+	cookies := register.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "browser_agent_access" || !cookies[0].HttpOnly {
+		t.Fatalf("register cookies = %#v", cookies)
+	}
+	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	meReq.AddCookie(cookies[0])
+	meResp := httptest.NewRecorder()
+	server.ServeHTTP(meResp, meReq)
+	if meResp.Code != http.StatusOK {
+		t.Fatalf("me status = %d body=%s", meResp.Code, meResp.Body.String())
+	}
+
+	ownedJob := postJSONWithActor(t, server, "/web/automation/browser-act-jobs", map[string]any{
+		"url":             "https://example.com",
+		"task":            "membership test",
+		"allowed_domains": []string{"example.com"},
+	}, tenantID, userID, identity.RoleTenantOwner, internalSecret)
+	if ownedJob.Code != http.StatusCreated {
+		t.Fatalf("member create job status = %d body=%s", ownedJob.Code, ownedJob.Body.String())
+	}
+
+	wrongRole := getJSONWithActor(t, server, "/web/automation/jobs", tenantID, userID, identity.RoleTenantViewer, internalSecret)
+	if wrongRole.Code != http.StatusForbidden {
+		t.Fatalf("stale membership role status = %d body=%s", wrongRole.Code, wrongRole.Body.String())
+	}
+	unknownMember := getJSONWithActor(t, server, "/web/automation/jobs", tenantID, "unknown-user", identity.RoleTenantOwner, internalSecret)
+	if unknownMember.Code != http.StatusForbidden {
+		t.Fatalf("unknown membership status = %d body=%s", unknownMember.Code, unknownMember.Body.String())
+	}
+
+	wrongPassword := postJSON(t, server, "/api/v1/auth/login", map[string]any{
+		"email": "owner@example.com", "password": "wrong-password-value",
+	}, "")
+	if wrongPassword.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong password status = %d body=%s", wrongPassword.Code, wrongPassword.Body.String())
+	}
+	login := postJSON(t, server, "/api/v1/auth/login", map[string]any{
+		"email": "OWNER@example.com", "password": "correct horse battery staple", "tenant_id": tenantID,
+	}, "")
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status = %d body=%s", login.Code, login.Body.String())
+	}
+	duplicate := postJSON(t, server, "/api/v1/auth/register", map[string]any{
+		"email":       "owner@example.com",
+		"password":    "another correct password",
+		"nickname":    "Duplicate",
+		"tenant_name": "Duplicate Studio",
+	}, "")
+	if duplicate.Code != http.StatusConflict {
+		t.Fatalf("duplicate registration status = %d body=%s", duplicate.Code, duplicate.Body.String())
+	}
+}
+
+func TestPublicRegistrationIsClosedByDefault(t *testing.T) {
+	server := NewServerWithConfig(config.Config{JWTSecret: "test-jwt-secret-with-at-least-32-bytes"}).Handler()
+	resp := postJSON(t, server, "/api/v1/auth/register", map[string]any{
+		"email":       "closed@example.com",
+		"password":    "correct horse battery staple",
+		"nickname":    "Closed",
+		"tenant_name": "Closed Studio",
+	}, "")
+	if resp.Code != http.StatusForbidden {
+		t.Fatalf("closed registration status = %d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestAuthenticationRejectsWeakSecretAndTrailingJSON(t *testing.T) {
+	weakSecretServer := NewServerWithConfig(config.Config{
+		JWTSecret:         "too-short",
+		AllowRegistration: true,
+	}).Handler()
+	weakSecret := postJSON(t, weakSecretServer, "/api/v1/auth/register", map[string]any{
+		"email": "weak@example.com", "password": "correct horse battery staple",
+		"nickname": "Weak", "tenant_name": "Weak Secret",
+	}, "")
+	if weakSecret.Code != http.StatusServiceUnavailable {
+		t.Fatalf("weak secret status = %d body=%s", weakSecret.Code, weakSecret.Body.String())
+	}
+
+	server := NewServerWithConfig(config.Config{
+		JWTSecret:         "test-jwt-secret-with-at-least-32-bytes",
+		AllowRegistration: true,
+	}).Handler()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/register", bytes.NewBufferString(`{} {}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	server.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("trailing JSON status = %d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestTenantIsolationAndWorkerOwnership(t *testing.T) {
 	const internalSecret = "test-internal-secret"
 	server := NewServerWithConfig(config.Config{

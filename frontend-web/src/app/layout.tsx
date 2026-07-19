@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileText, ClipboardList, Network, Home } from "lucide-react";
+import { ClipboardList, Home, KeyRound } from "lucide-react";
+import { AccountNav } from "@/components/AccountNav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -10,7 +11,8 @@ export const metadata: Metadata = {
 
 const navItems = [
   { href: "/", label: "工作台", icon: Home },
-  { href: "/jobs", label: "任务状态", icon: ClipboardList }
+  { href: "/jobs", label: "任务状态", icon: ClipboardList },
+  { href: "/worker/pair", label: "连接 Worker", icon: KeyRound },
 ];
 
 export default function RootLayout({
@@ -37,6 +39,7 @@ export default function RootLayout({
                   </Link>
                 );
               })}
+              <AccountNav />
             </nav>
           </header>
           <main className="content">{children}</main>

@@ -2,6 +2,7 @@
 
 ## Changelog
 
+- 2026-07-19：完成 Phase 1 客户身份主链路：`users` schema/migration、邮箱密码注册登录、租户 owner 创建、JWT + HttpOnly Cookie、active membership 在线校验、登录路径限流、登录/Worker 配对 Web UI 和本地 Gateway 端到端验收。
 - 2026-07-19：同步 Phase 1 首批实现：新增租户 schema/migration、Automation/Worker resource ownership、可信 Gateway 身份头、严格配对批准与双租户越权测试；真实账号登录和 membership 校验尚未完成。
 - 2026-07-19：首次建立线上客户交付与生产化技术基线，确定“云端控制面 + 客户本机 Worker”的首期形态，并拆分账号租户、部署、数据安全、Worker 交付、可观测性和发布门禁。
 
@@ -79,9 +80,9 @@ flowchart LR
 
 | 领域 | 当前基线 | 线上缺口 |
 | --- | --- | --- |
-| 身份与权限 | 已有 tenant/membership schema、最小角色集、可信 actor 和 Automation/Worker resource ownership | 缺真实登录/注册、membership 状态校验、JWT 签发与成员管理流程 |
-| Worker 身份 | 严格模式下配对必须由 tenant owner/platform admin 批准，device token、心跳、租户一致性和 revoke 已接通 | 缺登录后的 Web 配对 UI、客户化安装、安全凭据存储和升级 |
-| API 入口 | Gateway 已代理 `/web/*`、`/admin/*`、`/worker/*`，清除外部身份头并从 JWT 注入租户 actor；`/internal/*` 不对公网注册 | 缺真实身份提供方/会话签发、生产域名、TLS/WAF 和 staging 部署验收 |
+| 身份与权限 | 已有 user/tenant/membership、邮箱密码登录、JWT/HttpOnly Cookie、active membership 校验、最小角色集和完整 resource ownership | 缺成员邀请/移除、密码找回、邮箱验证、MFA/SSO 和 platform admin 独立身份流程 |
+| Worker 身份 | 严格模式下配对必须由 tenant owner/platform admin 批准；登录后 Web 配对 UI、device token、心跳、租户一致性和 revoke 已接通 | 缺客户化安装、安全凭据存储和升级 |
+| API 入口 | Gateway 已代理 `/api/v1/auth/*`、`/web/*`、`/admin/*`、`/worker/*`，校验 Cookie/JWT、清除外部身份头并注入租户 actor；登录注册有独立 IP 限流 | 缺生产域名、TLS/WAF、安全响应头完善和 staging 部署验收 |
 | 部署 | 有本地 Compose、生产 Compose 草案和 K3s 骨架 | 默认凭据、端口暴露、健康检查、变量、镜像版本和服务清单未形成可验收发布物 |
 | Artifact | API 支持上传、记录和下载，本地有请求大小上限 | 主要依赖本地文件路径，缺对象存储、租户级授权、留存、删除、扫描和容量配额 |
 | 数据 | MySQL schema 和 migration 已存在，Redis 用于 claim lock | 缺自动 migration job、托管备份、恢复演练、连接和容量告警 |
@@ -89,7 +90,7 @@ flowchart LR
 | 可观测性 | 有健康检查、Worker 心跳、run 状态和日志 | 缺集中日志、核心指标、告警、前端错误采集和线上 trace 关联 |
 | CI/CD | Go 与前端已有基础构建测试 | Worker 未纳入完整 CI，缺镜像构建/扫描/推送、staging、部署、回滚和线上 E2E |
 
-数据库中的部分 `user_id` 字段仍为兼容旧数据的可空字段；`tenant_id` 已通过基线和幂等 migration 加入 Worker/Automation 资源，并在 handler、repository、Worker 领任务/回写和 artifact 下载链路强制 ownership。下一步仍需将真实账号与 active membership 接入 JWT 签发，不能把“已有可信 actor 接口”视为完整账号系统。
+数据库中的部分 `user_id` 字段仍为兼容旧数据的可空字段；`tenant_id` 已通过基线和幂等 migration 加入 Worker/Automation 资源，并在 handler、repository、Worker 领任务/回写和 artifact 下载链路强制 ownership。真实账号会话已接入同一 ownership 链路；封闭内测前仍需补成员生命周期、密码找回/邮箱验证和独立 platform admin 身份。
 
 ## 5. 详细技术设计
 
@@ -123,6 +124,17 @@ flowchart LR
 5. 任何通过 `job_id`、`run_id`、`artifact_id`、`device_id` 访问资源的接口都必须验证 ownership。
 
 共享的 `ADMIN_API_TOKEN` 和 `WEB_API_TOKEN` 只能保留为本地开发或受控诊断能力，不能作为客户账号体系。
+
+当前账号接口：
+
+| 方法与路径 | 作用 | 匿名访问 |
+| --- | --- | --- |
+| `POST /api/v1/auth/register` | 创建 user、tenant 和 `tenant_owner` membership，并签发会话 | 仅当 `ALLOW_PUBLIC_REGISTRATION=true` |
+| `POST /api/v1/auth/login` | 校验 bcrypt 密码和 active membership，签发短期会话 | 是 |
+| `GET /api/v1/auth/me` | 从 Bearer 或 HttpOnly Cookie 读取并实时校验 session | 否 |
+| `POST /api/v1/auth/logout` | 清除浏览器 access cookie | 是 |
+
+访问 token 固定校验 HS256、issuer、audience、`exp` 和 `nbf`；`JWT_SECRET` 不足 32 字符时服务拒绝启用账号鉴权。浏览器默认使用 `SameSite=Lax`、`HttpOnly` Cookie，生产必须开启 `Secure`。Gateway 只对注册、登录、登出做精确匿名路径匹配，`/api/v1/auth/me` 不得因前缀匹配绕过鉴权。API 在使用 token 后再次读取 active user/tenant/membership，避免仅依赖签发时的角色快照。
 
 #### 5.1.3 Worker 配对
 
@@ -291,11 +303,11 @@ tenants/{tenant_id}/runs/{run_id}/{artifact_id}/{sanitized_filename}
 
 ### Phase 1：身份与租户隔离（上线阻断）
 
-- [ ] 实现用户、租户、membership 和 RBAC（tenant/membership schema、角色和 actor 已完成；真实账号与 membership 校验待完成）。
+- [x] 实现用户、租户、membership 和 RBAC 主链路（注册自动创建 owner；active membership 在会话与 `/web/*` 两层校验）。
 - [x] 为设备及 `automation_*` 资源增加强制 ownership。
 - [x] 列表、详情、下载、取消、人工动作、Worker 回写和设备操作已增加双租户授权测试。
-- [ ] Worker 配对绑定登录用户和租户，支持立即 revoke（严格配对批准和 revoke API 已完成；登录 UI 待完成）。
-- [ ] 将客户接口接入 Gateway 的真实鉴权链路（路由、身份头清理/注入和 API 信任校验已完成；真实 JWT 签发与部署待完成）。
+- [x] Worker 配对绑定登录用户和租户，提供登录后 Web 批准 UI，并支持立即 revoke。
+- [x] 将客户接口接入 Gateway 的真实 JWT/HttpOnly Cookie 鉴权链路，并完成本地端到端验收。
 
 **验收门禁**：使用两个测试租户执行自动化越权测试，任何跨租户读取、写入、下载或设备操作均返回拒绝。
 

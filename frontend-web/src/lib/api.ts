@@ -20,6 +20,7 @@ export async function api<T>(
   const response = await fetch(path, {
     method: init?.method || "GET",
     headers,
+    credentials: "include",
     body: init?.body ? JSON.stringify(init.body) : undefined,
   });
   if (!response.ok) {

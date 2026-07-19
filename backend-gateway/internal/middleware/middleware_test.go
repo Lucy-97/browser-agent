@@ -76,3 +76,49 @@ func TestJWTClearsIdentityHeadersOnPublicWorkerPath(t *testing.T) {
 		t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
 	}
 }
+
+func TestJWTUsesHttpOnlyAccessCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(JWT(stubJWTValidator{claims: Claims{
+		UserUUID: "cookie-user", TenantID: "cookie-tenant", TenantRole: "tenant_owner",
+	}}, JWTOptions{AccessTokenCookie: "browser_agent_access"}))
+	router.GET("/web/resource", func(c *gin.Context) {
+		if c.GetHeader("X-User-UUID") != "cookie-user" || c.GetHeader("X-Tenant-ID") != "cookie-tenant" {
+			t.Fatalf("cookie identity headers were not injected")
+		}
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/web/resource", nil)
+	req.AddCookie(&http.Cookie{Name: "browser_agent_access", Value: "valid-cookie-token", HttpOnly: true})
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("status = %d body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestJWTAuthPublicPathsAreExact(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(JWT(stubJWTValidator{err: errors.New("invalid")}, JWTOptions{
+		PublicPaths: []string{"/api/v1/auth/login", "/api/v1/auth/register"},
+	}))
+	router.POST("/api/v1/auth/login", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	router.GET("/api/v1/auth/me", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+	loginResp := httptest.NewRecorder()
+	router.ServeHTTP(loginResp, loginReq)
+	if loginResp.Code != http.StatusNoContent {
+		t.Fatalf("login status = %d", loginResp.Code)
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
+	meResp := httptest.NewRecorder()
+	router.ServeHTTP(meResp, meReq)
+	if meResp.Code != http.StatusUnauthorized {
+		t.Fatalf("me status = %d body=%s", meResp.Code, meResp.Body.String())
+	}
+}

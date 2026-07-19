@@ -24,8 +24,9 @@ type JWTConfig struct {
 	Secret              string
 	AccessTokenExpSec   int
 	RefreshTokenExpDays int
-	// PublicPaths 不需要登录的前缀（命中后仍尝试解析 token 注入身份头）。
-	PublicPaths []string
+	PublicPaths         []string
+	PublicPathPrefixes  []string
+	AccessTokenCookie   string
 }
 
 type RedisConfig struct {
@@ -61,11 +62,16 @@ func Load() *Config {
 			RefreshTokenExpDays: getEnvInt("JWT_REFRESH_TOKEN_EXP_DAYS", 30),
 			PublicPaths: []string{
 				"/health",
-				"/api/v1/auth",
+				"/api/v1/auth/register",
+				"/api/v1/auth/login",
+				"/api/v1/auth/logout",
+			},
+			PublicPathPrefixes: []string{
 				"/oauth2/",
 				"/login/oauth2/",
 				"/worker/",
 			},
+			AccessTokenCookie: getEnv("AUTH_COOKIE_NAME", "browser_agent_access"),
 		},
 		Redis: RedisConfig{
 			Host:     getEnv("REDIS_HOST", "localhost"),
@@ -92,9 +98,12 @@ func getEnv(key, fallback string) string {
 }
 
 func getEnvSecret(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		panic("FATAL: Missing required secret: " + key)
+	v := strings.TrimSpace(os.Getenv(key))
+	if len(v) < 32 {
+		if v == "" {
+			panic("FATAL: Missing required secret: " + key)
+		}
+		panic("FATAL: Secret must contain at least 32 characters: " + key)
 	}
 	return v
 }

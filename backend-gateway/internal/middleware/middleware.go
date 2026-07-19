@@ -115,10 +115,14 @@ type Claims struct {
 	Expired     bool // ValidateToken 内部已识别过期，给上层用于 403 判断
 }
 
-// JWTOptions 配置公开路径前缀与可选的 RefreshTokenCookieName。
+// JWTOptions 配置公开路径、访问 token cookie 与可选的 RefreshTokenCookieName。
 type JWTOptions struct {
+	// PublicPaths 只允许完全匹配的匿名路径。
+	PublicPaths []string
 	// PublicPathPrefixes 命中其中任一前缀即视为匿名可访问，但仍尝试解析 token 注入身份头。
 	PublicPathPrefixes []string
+	// AccessTokenCookie 是浏览器 HttpOnly access token cookie 名称。
+	AccessTokenCookie string
 	// RefreshTokenCookieName 例如 "refreshToken_"。当请求里存在该 cookie 但 access token 缺失/过期时返回 403（触发前端自动 refresh）。
 	RefreshTokenCookieName string
 }
@@ -128,9 +132,9 @@ func JWT(validator JWTValidator, opts JWTOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		clearUntrustedIdentity(c)
 		path := c.Request.URL.Path
-		token := extractToken(c)
+		token := extractTokenWithCookie(c, opts.AccessTokenCookie)
 
-		if matchAnyPrefix(path, opts.PublicPathPrefixes) {
+		if matchExact(path, opts.PublicPaths) || matchAnyPrefix(path, opts.PublicPathPrefixes) {
 			if token != "" {
 				if claims, err := validator.ValidateToken(token); err == nil {
 					injectIdentity(c, claims)
@@ -175,6 +179,18 @@ func extractToken(c *gin.Context) string {
 	return ""
 }
 
+func extractTokenWithCookie(c *gin.Context, cookieName string) string {
+	if token := extractToken(c); token != "" {
+		return token
+	}
+	if cookieName != "" {
+		if token, err := c.Cookie(cookieName); err == nil {
+			return token
+		}
+	}
+	return ""
+}
+
 func injectIdentity(c *gin.Context, claims Claims) {
 	if claims.UserUUID != "" {
 		c.Set("userUUID", claims.UserUUID)
@@ -201,6 +217,15 @@ func clearUntrustedIdentity(c *gin.Context) {
 func matchAnyPrefix(path string, prefixes []string) bool {
 	for _, p := range prefixes {
 		if strings.HasPrefix(path, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchExact(path string, paths []string) bool {
+	for _, candidate := range paths {
+		if path == candidate {
 			return true
 		}
 	}

@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -43,26 +42,56 @@ func RateLimit(rl *RedisRateLimiter) gin.HandlerFunc {
 			identifier = c.ClientIP()
 			prefix = "IP"
 		}
-
-		slot := time.Now().Unix() / int64(rl.window.Seconds())
-		key := fmt.Sprintf("RATE:%s:%s:%d", prefix, identifier, slot)
-		ctx := context.Background()
-
-		count, err := rl.rdb.Incr(ctx, key).Result()
-		if err != nil {
-			c.Next()
-			return
-		}
-		if count == 1 {
-			rl.rdb.Expire(ctx, key, rl.window+time.Second)
-		}
-		if count > int64(rl.rate) {
-			response.Err(c, http.StatusTooManyRequests, "000006", "Too many requests, please try again later")
-			c.Abort()
+		if !allowRequest(c, rl, prefix, identifier) {
 			return
 		}
 		c.Next()
 	}
+}
+
+// RateLimitPaths 对登录/注册等敏感匿名路径施加更低的独立 IP 限额。
+func RateLimitPaths(rl *RedisRateLimiter, paths []string) gin.HandlerFunc {
+	pathSet := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		pathSet[path] = struct{}{}
+	}
+	return func(c *gin.Context) {
+		if rl == nil || rl.rdb == nil {
+			c.Next()
+			return
+		}
+		if _, protected := pathSet[c.Request.URL.Path]; !protected {
+			c.Next()
+			return
+		}
+		if !allowRequest(c, rl, "AUTH_IP", c.ClientIP()) {
+			return
+		}
+		c.Next()
+	}
+}
+
+func allowRequest(c *gin.Context, rl *RedisRateLimiter, prefix string, identifier string) bool {
+	windowSeconds := int64(rl.window.Seconds())
+	if windowSeconds <= 0 {
+		windowSeconds = 1
+	}
+	slot := time.Now().Unix() / windowSeconds
+	key := fmt.Sprintf("RATE:%s:%s:%d", prefix, identifier, slot)
+	ctx := c.Request.Context()
+	count, err := rl.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return true
+	}
+	if count == 1 {
+		rl.rdb.Expire(ctx, key, rl.window+time.Second)
+	}
+	if count > int64(rl.rate) {
+		response.Err(c, http.StatusTooManyRequests, "000006", "Too many requests, please try again later")
+		c.Abort()
+		return false
+	}
+	return true
 }
 
 // ---------------- Prometheus Metrics ----------------

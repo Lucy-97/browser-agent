@@ -13,6 +13,11 @@ import (
 // ErrTokenExpired 用于上层区分过期与无效。
 var ErrTokenExpired = errors.New("token expired")
 
+const (
+	tokenIssuer   = "browser-agent-api"
+	tokenAudience = "browser-agent-gateway"
+)
+
 // Manager 签发与校验 access/refresh token。
 type Manager struct {
 	secret              []byte
@@ -22,7 +27,6 @@ type Manager struct {
 
 // claims 内部 JWT claims 结构。
 type claims struct {
-	UserUUID    string `json:"sub"`
 	MemberLevel string `json:"lvl,omitempty"`
 	TenantID    string `json:"tenant_id,omitempty"`
 	TenantRole  string `json:"tenant_role,omitempty"`
@@ -47,12 +51,15 @@ func (m *Manager) IssueAccessToken(userUUID, memberLevel string) (string, error)
 func (m *Manager) IssueTenantAccessToken(userUUID, memberLevel, tenantID, tenantRole string) (string, error) {
 	now := time.Now()
 	c := claims{
-		UserUUID:    userUUID,
 		MemberLevel: memberLevel,
 		TenantID:    tenantID,
 		TenantRole:  tenantRole,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userUUID,
+			Issuer:    tokenIssuer,
+			Audience:  jwt.ClaimStrings{tokenAudience},
 			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(m.accessTokenExpSec) * time.Second)),
 		},
 	}
@@ -64,9 +71,12 @@ func (m *Manager) IssueTenantAccessToken(userUUID, memberLevel, tenantID, tenant
 func (m *Manager) IssueRefreshToken(userUUID string) (string, error) {
 	now := time.Now()
 	c := claims{
-		UserUUID: userUUID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userUUID,
+			Issuer:    tokenIssuer,
+			Audience:  jwt.ClaimStrings{tokenAudience},
 			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(m.refreshTokenExpDays) * 24 * time.Hour)),
 		},
 	}
@@ -78,7 +88,7 @@ func (m *Manager) IssueRefreshToken(userUUID string) (string, error) {
 func (m *Manager) ValidateToken(token string) (pmw.Claims, error) {
 	parsed, err := jwt.ParseWithClaims(token, &claims{}, func(t *jwt.Token) (any, error) {
 		return m.secret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithIssuer(tokenIssuer), jwt.WithAudience(tokenAudience))
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
 			return pmw.Claims{Expired: true}, ErrTokenExpired
@@ -90,7 +100,7 @@ func (m *Manager) ValidateToken(token string) (pmw.Claims, error) {
 		return pmw.Claims{}, errors.New("invalid token")
 	}
 	return pmw.Claims{
-		UserUUID:    c.UserUUID,
+		UserUUID:    c.Subject,
 		MemberLevel: c.MemberLevel,
 		TenantID:    c.TenantID,
 		TenantRole:  c.TenantRole,

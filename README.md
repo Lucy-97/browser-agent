@@ -4,7 +4,7 @@
 
 ## Changelog
 
-- 2026-07-19：落地生产化 Phase 1 基础能力：Automation/Worker 资源租户归属、可信 Gateway 身份传递、严格 Worker 配对批准、跨租户越权测试和幂等数据库 migration；真实登录与 membership 校验仍为后续上线阻断项。
+- 2026-07-19：完成生产化 Phase 1 客户身份主链路：邮箱密码注册/登录、租户 owner 创建、JWT + HttpOnly Cookie、active membership 校验、登录限流、登录后 Worker 配对 UI 和本地 Web → Gateway → API 验收；成员管理仍留待封闭内测运营能力补齐。
 - 2026-07-19：新增线上客户交付与生产化技术方案，明确首期采用“云端控制面 + 客户本机 Worker”，并将账号租户隔离、生产部署和 Worker 交付列为上线门禁。
 - 2026-07-19：仓库收敛为单一 Browser Agent 项目，统一以 `main` 为开发主线，移除旧业务分支和多环境切换说明。
 
@@ -29,6 +29,7 @@
 bash deploy-local/tools/run-infra-local.sh start
 bash deploy-local/tools/db-apply.sh all
 bash deploy-local/tools/run-api-host-local.sh start
+bash deploy-local/tools/run-gateway-host-local.sh start
 bash deploy-local/tools/run-admin-host-local.sh start
 bash deploy-local/tools/run-web-host-local.sh start
 bash deploy-local/tools/run-worker-host-local.sh init
@@ -48,6 +49,7 @@ Linux/macOS 上，前端和本机 API 默认在宿主机通过 tmux 启动。前
 | --- | --- |
 | Web | `http://localhost:24001` |
 | Admin | `http://localhost:26174` |
+| Gateway | `http://localhost:29000` |
 | Go API | `http://localhost:29001` |
 | MySQL | `127.0.0.1:24307` |
 | Redis | `127.0.0.1:27380` |
@@ -56,17 +58,17 @@ Linux/macOS 上，前端和本机 API 默认在宿主机通过 tmux 启动。前
 
 当前仓库已完成本地 Web → API → Worker → Admin 基础链路验证，但现有 Compose/K3s 文件和可选共享 token 仍是开发或部署骨架，不能直接作为多客户生产环境。首期线上形态统一采用“云端 Web/Admin/Gateway/API/数据服务 + 客户本机 Worker”：第三方平台登录态和浏览器 profile 默认留在客户设备，Worker 仅通过出站 HTTPS 访问云端。
 
-生产化的实施阶段、信任边界、账号租户模型、对象存储、Worker 安装升级、监控告警和上线门禁见 [Browser Agent 线上客户交付与生产化技术方案](docs/tech/0719-browser-agent-productionization-plan.md)。在账号/租户/resource ownership 和生产鉴权完成前，不得将当前 Admin/API 直接暴露到公网。
+生产化的实施阶段、信任边界、账号租户模型、对象存储、Worker 安装升级、监控告警和上线门禁见 [Browser Agent 线上客户交付与生产化技术方案](docs/tech/0719-browser-agent-productionization-plan.md)。客户身份与租户隔离已在本地链路落地；在 Phase 2 的生产部署、Secret、对象存储、备份和 staging 门禁完成前，仍不得将当前 Admin/API 直接暴露到公网。
 
 ## 三、 核心微服务架构
 
 后端采用“职责解耦”的异构设计，最大化发挥不同语言的生态优势：
 
 *   **go-gateway — 流量网关**
-    *   统一请求入口（基于 Gin）。已有 JWT、Redis 限流、CORS 和指标骨架；当前 Automation 的 `/web/*`、`/worker/*` 生产路由和可信身份传递仍需按生产化方案接通。
+    *   统一请求入口（基于 Gin）。已接通 JWT/HttpOnly Cookie 验证、可信租户身份注入、Redis 全局与登录路径限流、CORS、指标和 `/web/*`、`/worker/*` 路由；生产域名、TLS/WAF 与 staging 部署属于 Phase 2。
 *   **go-api — 核心业务中枢**
     *   严密的三层架构（Handler → Engine → Repo）。
-    *   **唯一写权限节点**：全系统只有 go-api 有权对 MySQL 数据库执行 `INSERT/UPDATE/DELETE`。当前已承载 Automation、Worker、artifact 和 Admin/Web 接口；账号、租户和支付等客户化能力属于待接入边界。
+    *   **唯一写权限节点**：全系统只有 go-api 有权对 MySQL 数据库执行 `INSERT/UPDATE/DELETE`。当前已承载账号登录、租户 membership、Automation、Worker、artifact 和 Admin/Web 接口；支付与成员邀请等客户化能力属于后续边界。
     *   对内部（Python）暴露 `X-Internal-Secret` 鉴权的 `/internal/*` 端点处理强一致性写操作。
 
 ### 代码目录归属(TODO)
